@@ -1,0 +1,14 @@
+[package]
+name = "copy-redis"
+version = "0.1.0"
+authors = ["maplestoria <zkx6648@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+redis-event = { path = '../redis-event' }
+log="0.4.0"
+fern = "0.5"
+chrono = "0.4"
+structopt = "0.3"
