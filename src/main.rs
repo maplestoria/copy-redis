@@ -11,6 +11,8 @@ use redis::{ConnectionAddr, IntoConnectionInfo};
 use redis_event::listener::standalone;
 use redis_event::RedisListener;
 
+mod handler;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let opt: Opt = parse_args(args);
@@ -20,7 +22,7 @@ fn main() {
 
 fn run(opt: Opt) {
     let source = opt.source.into_connection_info().expect("源Redis URI无效");
-    let target = opt.target.into_connection_info().expect("目的Redis URI无效");
+    let target = opt.target.clone().into_connection_info().expect("目的Redis URI无效");
     if source.addr == target.addr {
         panic!("Error: 源Redis地址不能与目的Redis地址相同");
     }
@@ -44,6 +46,10 @@ fn run(opt: Opt) {
     };
     
     let mut listener = standalone::new(config);
+    
+    let rdb_handler = handler::new(&opt.target);
+    listener.set_rdb_listener(Box::new(rdb_handler));
+    
     if let Err(error) = listener.open() {
         panic!("连接到源Redis错误: {}", error.to_string());
     }
