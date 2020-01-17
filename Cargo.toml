@@ -12,4 +12,5 @@ log="0.4.0"
 fern = "0.5"
 chrono = "0.4"
 getopts = "0.2"
-redis="0.15.1"
+redis = "0.15.1"
+ctrlc = { version = "3.0", features = ["termination"] }

@@ -1,3 +1,4 @@
+extern crate ctrlc;
 extern crate getopts;
 
 use std::env;
@@ -5,6 +6,8 @@ use std::io;
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::process::exit;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use getopts::Options;
 use redis::{ConnectionAddr, IntoConnectionInfo};
@@ -43,16 +46,30 @@ fn run(opt: Opt) {
         password: source.passwd.unwrap_or_default(),
         repl_id: "?".to_string(),
         repl_offset: -1,
+        read_timeout: 200,
+        write_timeout: 200,
     };
     
-    let mut listener = standalone::new(config);
+    // 先关闭listener，因为listener在读取流中的数据时，是阻塞的，
+    // 所以在接收到ctrl-c信号的时候，得再等一会，等redis master的数据来到(或者读取超时)，此时，程序才会继续运行，
+    // 等命令被handler处理完之后，listener才能结束，而且handler的结束还必须在listener之后，要不然丢数据
+    let listener_running = Arc::new(AtomicBool::new(true));
+    let r1 = listener_running.clone();
+    ctrlc::set_handler(move || {
+        r1.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
     
-    let rdb_handler = handler::new(&opt.target);
+    let handler_running = Arc::new(AtomicBool::new(true));
+    let r2 = handler_running.clone();
+    let mut listener = standalone::new(config, listener_running);
+    
+    let rdb_handler = handler::new(&opt.target, handler_running);
     listener.set_rdb_listener(Box::new(rdb_handler));
     
     if let Err(error) = listener.open() {
         panic!("连接到源Redis错误: {}", error.to_string());
     }
+    r2.store(false, Ordering::Relaxed);
 }
 
 #[derive(Debug)]
@@ -118,36 +135,23 @@ fn setup_logger(log_file: &Option<String>) -> Result<(), fern::InitError> {
     
     base_config = base_config.level(log::LevelFilter::Info);
     
+    let log_format = fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S%.3f]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        });
+    
     if log_file.is_some() {
-        let file_config = fern::Dispatch::new()
-            .format(|out, message, record| {
-                out.finish(format_args!(
-                    "{}[{}][{}] {}",
-                    chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S%.3f]"),
-                    record.target(),
-                    record.level(),
-                    message
-                ))
-            })
-            .chain(fern::log_file(PathBuf::from(log_file.as_ref().unwrap()))?);
-        base_config
-            .chain(file_config)
-            .apply()?;
+        let file_config = log_format.chain(fern::log_file(PathBuf::from(log_file.as_ref().unwrap()))?);
+        base_config.chain(file_config).apply()?;
     } else {
-        let stdout_config = fern::Dispatch::new()
-            .format(|out, message, record| {
-                out.finish(format_args!(
-                    "{}[{}][{}] {}",
-                    chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S%.3f]"),
-                    record.target(),
-                    record.level(),
-                    message
-                ))
-            })
-            .chain(io::stdout());
-        base_config
-            .chain(stdout_config)
-            .apply()?;
+        let stdout_config = log_format.chain(io::stdout());
+        base_config.chain(stdout_config).apply()?;
     }
     Ok(())
 }
