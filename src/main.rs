@@ -1,11 +1,13 @@
 extern crate ctrlc;
 extern crate getopts;
 
+use std::cell::RefCell;
 use std::env;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::process::exit;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -63,8 +65,8 @@ fn run(opt: Opt) {
     let r2 = handler_running.clone();
     let mut listener = standalone::new(config, listener_running);
     
-    let rdb_handler = handler::new(&opt.target, handler_running);
-    listener.set_rdb_listener(Box::new(rdb_handler));
+    let event_handler = handler::new(&opt.target, handler_running);
+    listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     
     if let Err(error) = listener.open() {
         panic!("连接到源Redis错误: {}", error.to_string());
