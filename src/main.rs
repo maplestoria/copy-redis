@@ -2,8 +2,13 @@ extern crate ctrlc;
 extern crate getopts;
 
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::fs;
+use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io;
+use std::io::{Error, Read, Write};
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::process::exit;
@@ -13,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use getopts::Options;
+use log::{error, info};
 use redis::{ConnectionAddr, IntoConnectionInfo};
 use redis_event::listener::standalone;
 use redis_event::RedisListener;
@@ -41,8 +47,9 @@ fn run(opt: Opt) {
     } else {
         unimplemented!("Unix Domain Socket");
     }
+    let source_addr = socket_addr.to_string();
     
-    let config = redis_event::config::Config {
+    let mut config = redis_event::config::Config {
         is_discard_rdb: opt.discard_rdb,
         is_aof: opt.aof,
         addr: socket_addr,
@@ -52,6 +59,12 @@ fn run(opt: Opt) {
         read_timeout: Option::Some(Duration::from_millis(2000)),
         write_timeout: Option::Some(Duration::from_millis(2000)),
     };
+    
+    if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
+        info!("获取到REPL历史记录信息, id: {}, offset: {}", repl_id, repl_offset);
+        config.repl_id = repl_id;
+        config.repl_offset = repl_offset;
+    }
     
     // 先关闭listener，因为listener在读取流中的数据时，是阻塞的，
     // 所以在接收到ctrl-c信号的时候，得再等一会，等redis master的数据来到(或者读取超时)，此时，程序才会继续运行，
@@ -68,8 +81,46 @@ fn run(opt: Opt) {
     listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     
     if let Err(error) = listener.open() {
-        panic!("连接到源Redis错误: {}", error.to_string());
+        error!("连接到源Redis错误: {}", error.to_string());
     }
+    // 程序正常退出时，保存repl id和offset
+    if let Err(err) = save_repl_meta(&source_addr, &listener.config.repl_id, listener.config.repl_offset) {
+        error!("保存REPL信息失败:{}", err);
+    }
+}
+
+fn load_repl_meta(source_addr: &str) -> io::Result<(String, i64)> {
+    let mut s = DefaultHasher::new();
+    source_addr.hash(&mut s);
+    let hash = s.finish();
+    let path = format!(".copy_redis/{}", hash);
+    let mut file = File::open(PathBuf::from(path))?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+    let vec: Vec<&str> = buf.split(",").collect();
+    if vec.len() == 2 {
+        let id = vec.get(0).unwrap();
+        let offset = vec.get(1).unwrap();
+        if let Ok(offset) = offset.parse::<i64>() {
+            return Ok((id.to_string(), offset));
+        }
+    }
+    Err(Error::new(io::ErrorKind::InvalidData, "未能获取到有效的REPL历史信息"))
+}
+
+fn save_repl_meta(source_addr: &str, id: &str, offset: i64) -> io::Result<()> {
+    let mut s = DefaultHasher::new();
+    source_addr.hash(&mut s);
+    let hash = s.finish();
+    let path = format!(".copy_redis/{}", hash);
+    if let Err(_) = fs::metadata(".copy_redis") {
+        fs::create_dir(".copy_redis")?;
+    }
+    let mut file = File::create(PathBuf::from(path))?;
+    let meta = format!("{},{}", id, offset);
+    file.write(meta.as_bytes())?;
+    file.flush()?;
+    Ok(())
 }
 
 #[derive(Debug)]
