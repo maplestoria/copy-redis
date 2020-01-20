@@ -7,6 +7,7 @@ use log::{error, info};
 use redis::Cmd;
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
+use redis_event::cmd::sorted_sets::AGGREGATE;
 use redis_event::cmd::strings::{ExistType, ExpireType, Op, Operation, Overflow};
 use redis_event::Event::{AOF, RDB};
 use redis_event::rdb::Object;
@@ -211,7 +212,10 @@ impl EventHandlerImpl {
             Command::EVALSHA(_) => {}
             Command::EXPIRE(_) => {}
             Command::EXPIREAT(_) => {}
-            Command::EXEC => {}
+            Command::EXEC => {
+                let cmd = redis::cmd("EXEC");
+                self.send(cmd);
+            }
             Command::FLUSHALL(_) => {}
             Command::FLUSHDB(_) => {}
             Command::GETSET(getset) => {
@@ -256,7 +260,10 @@ impl EventHandlerImpl {
                 }
                 self.send(cmd);
             }
-            Command::MULTI => {}
+            Command::MULTI => {
+                let cmd = redis::cmd("MULTI");
+                self.send(cmd);
+            }
             Command::PERSIST(_) => {}
             Command::PEXPIRE(_) => {}
             Command::PEXPIREAT(_) => {}
@@ -337,16 +344,124 @@ impl EventHandlerImpl {
             Command::SUNIONSTORE(_) => {}
             Command::SWAPDB(_) => {}
             Command::UNLINK(_) => {}
-            Command::ZADD(_) => {}
-            Command::ZINCRBY(_) => {}
-            Command::ZINTERSTORE(_) => {}
-            Command::ZPOPMAX(_) => {}
-            Command::ZPOPMIN(_) => {}
-            Command::ZREM(_) => {}
-            Command::ZREMRANGEBYLEX(_) => {}
-            Command::ZREMRANGEBYRANK(_) => {}
-            Command::ZREMRANGEBYSCORE(_) => {}
-            Command::ZUNIONSTORE(_) => {}
+            Command::ZADD(zadd) => {
+                let mut cmd = redis::cmd("ZADD");
+                cmd.arg(zadd.key);
+                if let Some(exist_type) = &zadd.exist_type {
+                    match exist_type {
+                        ExistType::NX => {
+                            cmd.arg("NX");
+                        }
+                        ExistType::XX => {
+                            cmd.arg("XX");
+                        }
+                    }
+                }
+                if let Some(_) = &zadd.ch {
+                    cmd.arg("CH");
+                }
+                if let Some(_) = &zadd.incr {
+                    cmd.arg("INCR");
+                }
+                for item in &zadd.items {
+                    cmd.arg(item.score).arg(item.member);
+                }
+                self.send(cmd);
+            }
+            Command::ZINCRBY(zincrby) => {
+                let mut cmd = redis::cmd("ZINCRBY");
+                cmd.arg(zincrby.key).arg(zincrby.increment).arg(zincrby.member);
+                self.send(cmd);
+            }
+            Command::ZINTERSTORE(zinterstore) => {
+                let mut cmd = redis::cmd("ZINTERSTORE");
+                cmd.arg(zinterstore.destination).arg(zinterstore.num_keys);
+                for key in &zinterstore.keys {
+                    cmd.arg(*key);
+                }
+                if let Some(weights) = &zinterstore.weights {
+                    cmd.arg("WEIGHTS");
+                    for weight in weights {
+                        cmd.arg(*weight);
+                    }
+                }
+                if let Some(aggregate) = &zinterstore.aggregate {
+                    cmd.arg("AGGREGATE");
+                    match aggregate {
+                        AGGREGATE::SUM => { cmd.arg("SUM"); }
+                        AGGREGATE::MIN => { cmd.arg("MIN"); }
+                        AGGREGATE::MAX => { cmd.arg("MAX"); }
+                    }
+                }
+                self.send(cmd);
+            }
+            Command::ZPOPMAX(zpopmax) => {
+                let mut cmd = redis::cmd("ZPOPMAX");
+                cmd.arg(zpopmax.key);
+                if let Some(count) = zpopmax.count {
+                    cmd.arg(count);
+                }
+                self.send(cmd);
+            }
+            Command::ZPOPMIN(zpopmin) => {
+                let mut cmd = redis::cmd("ZPOPMIN");
+                cmd.arg(zpopmin.key);
+                if let Some(count) = zpopmin.count {
+                    cmd.arg(count);
+                }
+                self.send(cmd);
+            }
+            Command::ZREM(zrem) => {
+                let mut cmd = redis::cmd("ZREM");
+                cmd.arg(zrem.key);
+                for member in &zrem.members {
+                    cmd.arg(*member);
+                }
+                self.send(cmd);
+            }
+            Command::ZREMRANGEBYLEX(zrem) => {
+                let mut cmd = redis::cmd("ZREMRANGEBYLEX");
+                cmd.arg(zrem.key).arg(zrem.min).arg(zrem.max);
+                self.send(cmd);
+            }
+            Command::ZREMRANGEBYRANK(zrem) => {
+                let mut cmd = redis::cmd("ZREMRANGEBYRANK");
+                cmd.arg(zrem.key).arg(zrem.start).arg(zrem.stop);
+                self.send(cmd);
+            }
+            Command::ZREMRANGEBYSCORE(zrem) => {
+                let mut cmd = redis::cmd("ZREMRANGEBYSCORE");
+                cmd.arg(zrem.key).arg(zrem.min).arg(zrem.max);
+                self.send(cmd);
+            }
+            Command::ZUNIONSTORE(zunion) => {
+                let mut cmd = redis::cmd("ZUNIONSTORE");
+                cmd.arg(zunion.destination).arg(zunion.destination).arg(zunion.num_keys);
+                for key in &zunion.keys {
+                    cmd.arg(*key);
+                }
+                if let Some(weights) = &zunion.weights {
+                    cmd.arg("WEIGHTS");
+                    for weight in weights {
+                        cmd.arg(*weight);
+                    }
+                }
+                if let Some(aggregate) = &zunion.aggregate {
+                    cmd.arg("AGGREGATE");
+                    match aggregate {
+                        AGGREGATE::SUM => {
+                            cmd.arg("SUM");
+                        }
+                        AGGREGATE::MIN => {
+                            cmd.arg("MIN");
+                        }
+                        AGGREGATE::MAX => {
+                            cmd.arg("MAX");
+                        }
+                    }
+                }
+                self.send(cmd);
+            }
         }
     }
 }
