@@ -263,7 +263,11 @@ impl EventHandlerImpl {
             Command::PFADD(_) => {}
             Command::PFCOUNT(_) => {}
             Command::PFMERGE(_) => {}
-            Command::PSETEX(_) => {}
+            Command::PSETEX(psetex) => {
+                let mut cmd = redis::cmd("PSETEX");
+                cmd.arg(psetex.key).arg(psetex.milliseconds).arg(psetex.value);
+                self.send(cmd);
+            }
             Command::PUBLISH(_) => {}
             Command::RENAME(_) => {}
             Command::RENAMENX(_) => {}
@@ -301,15 +305,31 @@ impl EventHandlerImpl {
                 }
                 self.send(cmd);
             }
-            Command::SETBIT(_) => {}
-            Command::SETEX(_) => {}
-            Command::SETNX(_) => {}
+            Command::SETBIT(setbit) => {
+                let mut cmd = redis::cmd("SETBIT");
+                cmd.arg(setbit.key).arg(setbit.offset).arg(setbit.value);
+                self.send(cmd);
+            }
+            Command::SETEX(setex) => {
+                let mut cmd = redis::cmd("SETEX");
+                cmd.arg(setex.key).arg(setex.seconds).arg(setex.value);
+                self.send(cmd);
+            }
+            Command::SETNX(setnx) => {
+                let mut cmd = redis::cmd("SETNX");
+                cmd.arg(setnx.key).arg(setnx.value);
+                self.send(cmd);
+            }
             Command::SELECT(select) => {
                 let mut cmd = redis::cmd("SELECT");
                 cmd.arg(select.db);
                 self.send(cmd);
             }
-            Command::SETRANGE(_) => {}
+            Command::SETRANGE(setrange) => {
+                let mut cmd = redis::cmd("SETRANGE");
+                cmd.arg(setrange.key).arg(setrange.offset).arg(setrange.value);
+                self.send(cmd);
+            }
             Command::SINTERSTORE(_) => {}
             Command::SMOVE(_) => {}
             Command::SORT(_) => {}
