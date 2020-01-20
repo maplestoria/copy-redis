@@ -49,8 +49,8 @@ fn run(opt: Opt) {
         password: source.passwd.unwrap_or_default(),
         repl_id: "?".to_string(),
         repl_offset: -1,
-        read_timeout: Option::Some(Duration::from_millis(200)),
-        write_timeout: Option::Some(Duration::from_millis(200)),
+        read_timeout: Option::Some(Duration::from_millis(2000)),
+        write_timeout: Option::Some(Duration::from_millis(2000)),
     };
     
     // 先关闭listener，因为listener在读取流中的数据时，是阻塞的，

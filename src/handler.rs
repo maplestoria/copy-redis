@@ -5,9 +5,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
+use redis::Cmd;
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
-use redis_event::cmd::strings::{ExistType, ExpireType};
+use redis_event::cmd::strings::{ExistType, ExpireType, Op, Operation, Overflow};
 use redis_event::Event::{AOF, RDB};
 use redis_event::rdb::Object;
 
@@ -31,24 +32,28 @@ impl EventHandler for EventHandlerImpl {
 }
 
 impl EventHandlerImpl {
+    fn send(&mut self, cmd: Cmd) {
+        self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+    }
+    
     fn handle_rdb(&mut self, rdb: Object) {
         match rdb {
             Object::String(kv) => {
                 if kv.meta.db != self.db {
                     let mut cmd = redis::cmd("select");
                     cmd.arg(kv.meta.db);
-                    self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                    self.send(cmd);
                     self.db = kv.meta.db;
                 }
                 let mut cmd = redis::cmd("set");
                 cmd.arg(kv.key).arg(kv.value);
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             Object::List(list) => {
                 if list.meta.db != self.db {
                     let mut cmd = redis::cmd("select");
                     cmd.arg(list.meta.db);
-                    self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                    self.send(cmd);
                     self.db = list.meta.db;
                 }
                 let mut cmd = redis::cmd("rpush");
@@ -56,13 +61,13 @@ impl EventHandlerImpl {
                 for val in list.values {
                     cmd.arg(val.as_slice());
                 }
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             Object::Set(set) => {
                 if set.meta.db != self.db {
                     let mut cmd = redis::cmd("select");
                     cmd.arg(set.meta.db);
-                    self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                    self.send(cmd);
                     self.db = set.meta.db;
                 }
                 let mut cmd = redis::cmd("sadd");
@@ -70,13 +75,13 @@ impl EventHandlerImpl {
                 for member in set.members {
                     cmd.arg(member.as_slice());
                 }
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             Object::SortedSet(sorted_set) => {
                 if sorted_set.meta.db != self.db {
                     let mut cmd = redis::cmd("select");
                     cmd.arg(sorted_set.meta.db);
-                    self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                    self.send(cmd);
                     self.db = sorted_set.meta.db;
                 }
                 let mut cmd = redis::cmd("zadd");
@@ -84,13 +89,13 @@ impl EventHandlerImpl {
                 for item in sorted_set.items {
                     cmd.arg(item.score).arg(item.member.as_slice());
                 }
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             Object::Hash(hash) => {
                 if hash.meta.db != self.db {
                     let mut cmd = redis::cmd("select");
                     cmd.arg(hash.meta.db);
-                    self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                    self.send(cmd);
                     self.db = hash.meta.db;
                 }
                 let mut cmd = redis::cmd("hmset");
@@ -98,42 +103,138 @@ impl EventHandlerImpl {
                 for field in hash.fields {
                     cmd.arg(field.name.as_slice()).arg(field.value.as_slice());
                 }
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             _ => {}
         }
     }
     
     fn handle_aof(&mut self, cmd: Command) {
+        info!("{:?}", cmd);
         match cmd {
-            Command::APPEND(_) => {}
-            Command::BITFIELD(_) => {}
-            Command::BITOP(_) => {}
-            Command::BRPOPLPUSH(_) => {}
-            Command::DECR(_) => {}
-            Command::DECRBY(_) => {}
+            Command::APPEND(append) => {
+                let mut cmd = redis::cmd("APPEND");
+                cmd.arg(append.key).arg(append.value);
+                self.send(cmd);
+            }
+            Command::BITFIELD(bitfield) => {
+                let mut cmd = redis::cmd("BITFIELD");
+                cmd.arg(bitfield.key);
+                if let Some(statement) = &bitfield.statements {
+                    for op in statement {
+                        match op {
+                            Operation::GET(get) => {
+                                cmd.arg("GET").arg(get._type).arg(get.offset);
+                            }
+                            Operation::INCRBY(incrby) => {
+                                cmd.arg("INCRBY").arg(incrby._type).arg(incrby.offset).arg(incrby.increment);
+                            }
+                            Operation::SET(set) => {
+                                cmd.arg("SET").arg(set._type).arg(set.offset).arg(set.value);
+                            }
+                        }
+                    }
+                }
+                if let Some(overflow) = &bitfield.overflows {
+                    for of in overflow {
+                        match of {
+                            Overflow::WRAP => {
+                                cmd.arg("OVERFLOW").arg("WRAP");
+                            }
+                            Overflow::SAT => {
+                                cmd.arg("OVERFLOW").arg("SAT");
+                            }
+                            Overflow::FAIL => {
+                                cmd.arg("OVERFLOW").arg("FAIL");
+                            }
+                        }
+                    }
+                }
+                self.send(cmd);
+            }
+            Command::BITOP(bitop) => {
+                let mut cmd = redis::cmd("BITOP");
+                match bitop.operation {
+                    Op::AND => {
+                        cmd.arg("AND");
+                    }
+                    Op::OR => {
+                        cmd.arg("OR");
+                    }
+                    Op::XOR => {
+                        cmd.arg("XOR");
+                    }
+                    Op::NOT => {
+                        cmd.arg("NOT");
+                    }
+                }
+                cmd.arg(bitop.dest_key);
+                for key in &bitop.keys {
+                    cmd.arg(key.as_slice());
+                }
+                self.send(cmd);
+            }
+            Command::BRPOPLPUSH(brpoplpush) => {
+                let mut cmd = redis::cmd("BRPOPLPUSH");
+                cmd.arg(brpoplpush.source)
+                    .arg(brpoplpush.destination)
+                    .arg(brpoplpush.timeout);
+                self.send(cmd);
+            }
+            Command::DECR(decr) => {
+                let mut cmd = redis::cmd("DECR");
+                cmd.arg(decr.key);
+                self.send(cmd);
+            }
+            Command::DECRBY(decrby) => {
+                let mut cmd = redis::cmd("DECRBY");
+                cmd.arg(decrby.key).arg(decrby.decrement);
+                self.send(cmd);
+            }
             Command::DEL(del) => {
-                let mut cmd = redis::cmd("del");
+                let mut cmd = redis::cmd("DEL");
                 for key in &del.keys {
                     cmd.arg(key.as_slice());
                 }
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
-            Command::EVAL(_) => {}
+            Command::EVAL(eval) => {
+                let mut cmd = redis::cmd("EVAL");
+                cmd.arg(eval.script).arg(eval.num_keys);
+                for key in &eval.keys {
+                    cmd.arg(*key);
+                }
+                for arg in &eval.args {
+                    cmd.arg(*arg);
+                }
+                self.send(cmd);
+            }
             Command::EVALSHA(_) => {}
             Command::EXPIRE(_) => {}
             Command::EXPIREAT(_) => {}
             Command::EXEC => {}
             Command::FLUSHALL(_) => {}
             Command::FLUSHDB(_) => {}
-            Command::GETSET(_) => {}
+            Command::GETSET(getset) => {
+                let mut cmd = redis::cmd("GETSET");
+                cmd.arg(getset.key).arg(getset.value);
+                self.send(cmd);
+            }
             Command::HDEL(_) => {}
             Command::HINCRBY(_) => {}
             Command::HMSET(_) => {}
             Command::HSET(_) => {}
             Command::HSETNX(_) => {}
-            Command::INCR(_) => {}
-            Command::INCRBY(_) => {}
+            Command::INCR(incr) => {
+                let mut cmd = redis::cmd("INCR");
+                cmd.arg(incr.key);
+                self.send(cmd);
+            }
+            Command::INCRBY(incrby) => {
+                let mut cmd = redis::cmd("INCRBY");
+                cmd.arg(incrby.key).arg(incrby.increment);
+                self.send(cmd);
+            }
             Command::LINSERT(_) => {}
             Command::LPOP(_) => {}
             Command::LPUSH(_) => {}
@@ -142,8 +243,20 @@ impl EventHandlerImpl {
             Command::LSET(_) => {}
             Command::LTRIM(_) => {}
             Command::MOVE(_) => {}
-            Command::MSET(_) => {}
-            Command::MSETNX(_) => {}
+            Command::MSET(mset) => {
+                let mut cmd = redis::cmd("MSET");
+                for kv in &mset.key_values {
+                    cmd.arg(kv.key).arg(kv.value);
+                }
+                self.send(cmd);
+            }
+            Command::MSETNX(msetnx) => {
+                let mut cmd = redis::cmd("MSETNX");
+                for kv in &msetnx.key_values {
+                    cmd.arg(kv.key).arg(kv.value);
+                }
+                self.send(cmd);
+            }
             Command::MULTI => {}
             Command::PERSIST(_) => {}
             Command::PEXPIRE(_) => {}
@@ -165,7 +278,7 @@ impl EventHandlerImpl {
             Command::SCRIPTLOAD(_) => {}
             Command::SDIFFSTORE(_) => {}
             Command::SET(set) => {
-                let mut cmd = redis::cmd("set");
+                let mut cmd = redis::cmd("SET");
                 cmd.arg(set.key).arg(set.value);
                 if let Some((expire_type, value)) = set.expire.as_ref() {
                     match expire_type {
@@ -187,15 +300,15 @@ impl EventHandlerImpl {
                         }
                     }
                 }
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             Command::SETBIT(_) => {}
             Command::SETEX(_) => {}
             Command::SETNX(_) => {}
             Command::SELECT(select) => {
-                let mut cmd = redis::cmd("select");
+                let mut cmd = redis::cmd("SELECT");
                 cmd.arg(select.db);
-                self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+                self.send(cmd);
             }
             Command::SETRANGE(_) => {}
             Command::SINTERSTORE(_) => {}
