@@ -10,12 +10,12 @@ use std::process::exit;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use getopts::Options;
 use redis::{ConnectionAddr, IntoConnectionInfo};
 use redis_event::listener::standalone;
 use redis_event::RedisListener;
-use std::time::Duration;
 
 mod handler;
 
@@ -62,17 +62,14 @@ fn run(opt: Opt) {
         r1.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
     
-    let handler_running = Arc::new(AtomicBool::new(true));
-    let r2 = handler_running.clone();
     let mut listener = standalone::new(config, listener_running);
     
-    let event_handler = handler::new(&opt.target, handler_running);
+    let event_handler = handler::new(&opt.target);
     listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     
     if let Err(error) = listener.open() {
         panic!("连接到源Redis错误: {}", error.to_string());
     }
-    r2.store(false, Ordering::Relaxed);
 }
 
 #[derive(Debug)]

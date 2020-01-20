@@ -1,5 +1,4 @@
-use std::sync::{Arc, mpsc};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -341,7 +340,7 @@ impl Drop for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: &str, running: Arc<AtomicBool>) -> EventHandlerImpl {
+pub(crate) fn new(target: &str) -> EventHandlerImpl {
     let addr = target.to_string();
     let (sender, receiver) = mpsc::channel();
     let worker_thread = thread::spawn(move || {
@@ -353,14 +352,13 @@ pub(crate) fn new(target: &str, running: Arc<AtomicBool>) -> EventHandlerImpl {
         let mut timer = Instant::now();
         let hundred_millis = Duration::from_millis(100);
         let mut shutdown = false;
-        while running.load(Ordering::Relaxed) {
+        loop {
             match receiver.recv_timeout(Duration::from_millis(1)) {
                 Ok(Message::Cmd(cmd)) => {
                     pipeline.add_command(cmd);
                     count += 1;
                 }
                 Ok(Message::Terminate) => {
-                    running.store(false, Ordering::Relaxed);
                     shutdown = true;
                 }
                 Err(_) => {}
@@ -377,6 +375,9 @@ pub(crate) fn new(target: &str, running: Arc<AtomicBool>) -> EventHandlerImpl {
                 pipeline = redis::pipe();
                 count = 0;
             }
+            if shutdown {
+                break;
+            };
         }
         info!("Worker thread terminated");
     });
