@@ -7,6 +7,7 @@ use log::{error, info};
 use redis::Cmd;
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
+use redis_event::cmd::keys::ORDER;
 use redis_event::cmd::sorted_sets::AGGREGATE;
 use redis_event::cmd::strings::{ExistType, ExpireType, Op, Operation, Overflow};
 use redis_event::Event::{AOF, RDB};
@@ -209,9 +210,27 @@ impl EventHandlerImpl {
                 }
                 self.send(cmd);
             }
-            Command::EVALSHA(_) => {}
-            Command::EXPIRE(_) => {}
-            Command::EXPIREAT(_) => {}
+            Command::EVALSHA(evalsha) => {
+                let mut cmd = redis::cmd("EVALSHA");
+                cmd.arg(evalsha.sha1).arg(evalsha.num_keys);
+                for key in &evalsha.keys {
+                    cmd.arg(*key);
+                }
+                for arg in &evalsha.args {
+                    cmd.arg(*arg);
+                }
+                self.send(cmd);
+            }
+            Command::EXPIRE(expire) => {
+                let mut cmd = redis::cmd("EXPIRE");
+                cmd.arg(expire.key).arg(expire.seconds);
+                self.send(cmd);
+            }
+            Command::EXPIREAT(expireat) => {
+                let mut cmd = redis::cmd("EXPIREAT");
+                cmd.arg(expireat.key).arg(expireat.timestamp);
+                self.send(cmd);
+            }
             Command::EXEC => {
                 let cmd = redis::cmd("EXEC");
                 self.send(cmd);
@@ -275,18 +294,89 @@ impl EventHandlerImpl {
                 cmd.arg(psetex.key).arg(psetex.milliseconds).arg(psetex.value);
                 self.send(cmd);
             }
-            Command::PUBLISH(_) => {}
-            Command::RENAME(_) => {}
-            Command::RENAMENX(_) => {}
-            Command::RESTORE(_) => {}
-            Command::RPOP(_) => {}
-            Command::RPOPLPUSH(_) => {}
-            Command::RPUSH(_) => {}
-            Command::RPUSHX(_) => {}
-            Command::SADD(_) => {}
-            Command::SCRIPTFLUSH => {}
-            Command::SCRIPTLOAD(_) => {}
-            Command::SDIFFSTORE(_) => {}
+            Command::PUBLISH(publish) => {
+                let mut cmd = redis::cmd("PUBLISH");
+                cmd.arg(publish.channel).arg(publish.message);
+                self.send(cmd);
+            }
+            Command::RENAME(rename) => {
+                let mut cmd = redis::cmd("RENAME");
+                cmd.arg(rename.key).arg(rename.new_key);
+                self.send(cmd);
+            }
+            Command::RENAMENX(renamenx) => {
+                let mut cmd = redis::cmd("RENAMENX");
+                cmd.arg(renamenx.key).arg(renamenx.new_key);
+                self.send(cmd);
+            }
+            Command::RESTORE(restore) => {
+                let mut cmd = redis::cmd("RESTORE");
+                cmd.arg(restore.key).arg(restore.ttl).arg(restore.value);
+                if restore.replace.is_some() {
+                    cmd.arg("REPLACE");
+                }
+                if restore.abs_ttl.is_some() {
+                    cmd.arg("ABSTTL");
+                }
+                if let Some(idle) = restore.idle_time {
+                    cmd.arg("IDLETIME").arg(idle);
+                }
+                if let Some(freq) = restore.freq {
+                    cmd.arg("FREQ").arg(freq);
+                }
+                self.send(cmd);
+            }
+            Command::RPOP(rpop) => {
+                let mut cmd = redis::cmd("RPOP");
+                cmd.arg(rpop.key);
+                self.send(cmd);
+            }
+            Command::RPOPLPUSH(rpoplpush) => {
+                let mut cmd = redis::cmd("RPOPLPUSH");
+                cmd.arg(rpoplpush.source).arg(rpoplpush.destination);
+                self.send(cmd);
+            }
+            Command::RPUSH(rpush) => {
+                let mut cmd = redis::cmd("RPUSH");
+                cmd.arg(rpush.key);
+                for element in &rpush.elements {
+                    cmd.arg(*element);
+                }
+                self.send(cmd);
+            }
+            Command::RPUSHX(rpushx) => {
+                let mut cmd = redis::cmd("RPUSHX");
+                cmd.arg(rpushx.key);
+                for element in &rpushx.elements {
+                    cmd.arg(*element);
+                }
+                self.send(cmd);
+            }
+            Command::SADD(sadd) => {
+                let mut cmd = redis::cmd("SADD");
+                cmd.arg(sadd.key);
+                for member in &sadd.members {
+                    cmd.arg(*member);
+                }
+                self.send(cmd);
+            }
+            Command::SCRIPTFLUSH => {
+                let cmd = redis::cmd("SCRIPT FLUSH");
+                self.send(cmd);
+            }
+            Command::SCRIPTLOAD(scriptload) => {
+                let mut cmd = redis::cmd("SCRIPT LOAD");
+                cmd.arg(scriptload.script);
+                self.send(cmd);
+            }
+            Command::SDIFFSTORE(sdiffstore) => {
+                let mut cmd = redis::cmd("SDIFFSTORE");
+                cmd.arg(sdiffstore.destination);
+                for key in &sdiffstore.keys {
+                    cmd.arg(*key);
+                }
+                self.send(cmd);
+            }
             Command::SET(set) => {
                 let mut cmd = redis::cmd("SET");
                 cmd.arg(set.key).arg(set.value);
@@ -337,13 +427,79 @@ impl EventHandlerImpl {
                 cmd.arg(setrange.key).arg(setrange.offset).arg(setrange.value);
                 self.send(cmd);
             }
-            Command::SINTERSTORE(_) => {}
-            Command::SMOVE(_) => {}
-            Command::SORT(_) => {}
-            Command::SREM(_) => {}
-            Command::SUNIONSTORE(_) => {}
-            Command::SWAPDB(_) => {}
-            Command::UNLINK(_) => {}
+            Command::SINTERSTORE(sinterstore) => {
+                let mut cmd = redis::cmd("SINTERSTORE");
+                cmd.arg(sinterstore.destination);
+                for key in &sinterstore.keys {
+                    cmd.arg(*key);
+                }
+                self.send(cmd);
+            }
+            Command::SMOVE(smove) => {
+                let mut cmd = redis::cmd("SMOVE");
+                cmd.arg(smove.source).arg(smove.destination).arg(smove.member);
+                self.send(cmd);
+            }
+            Command::SORT(sort) => {
+                let mut cmd = redis::cmd("SORT");
+                cmd.arg(sort.key);
+                if let Some(pattern) = sort.by_pattern {
+                    cmd.arg("BY").arg(pattern);
+                }
+                if let Some(limit) = &sort.limit {
+                    cmd.arg("LIMIT").arg(limit.offset).arg(limit.count);
+                }
+                if let Some(get_patterns) = &sort.get_patterns {
+                    for pattern in get_patterns {
+                        cmd.arg("GET").arg(*pattern);
+                    }
+                }
+                if let Some(order) = &sort.order {
+                    match order {
+                        ORDER::ASC => {
+                            cmd.arg("ASC");
+                        }
+                        ORDER::DESC => {
+                            cmd.arg("DESC");
+                        }
+                    }
+                }
+                if sort.alpha.is_some() {
+                    cmd.arg("ALPHA");
+                }
+                if let Some(dest) = sort.destination {
+                    cmd.arg("STORE").arg(dest);
+                }
+                self.send(cmd);
+            }
+            Command::SREM(srem) => {
+                let mut cmd = redis::cmd("SREM");
+                cmd.arg(srem.key);
+                for member in &srem.members {
+                    cmd.arg(*member);
+                }
+                self.send(cmd);
+            }
+            Command::SUNIONSTORE(sunion) => {
+                let mut cmd = redis::cmd("SUNIONSTORE");
+                cmd.arg(sunion.destination);
+                for key in &sunion.keys {
+                    cmd.arg(*key);
+                }
+                self.send(cmd);
+            }
+            Command::SWAPDB(swapdb) => {
+                let mut cmd = redis::cmd("SWAPDB");
+                cmd.arg(swapdb.index1).arg(swapdb.index2);
+                self.send(cmd);
+            }
+            Command::UNLINK(unlink) => {
+                let mut cmd = redis::cmd("UNLINK");
+                for key in &unlink.keys {
+                    cmd.arg(*key);
+                }
+                self.send(cmd);
+            }
             Command::ZADD(zadd) => {
                 let mut cmd = redis::cmd("ZADD");
                 cmd.arg(zadd.key);
