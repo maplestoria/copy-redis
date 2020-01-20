@@ -8,6 +8,7 @@ use redis::Cmd;
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
 use redis_event::cmd::keys::ORDER;
+use redis_event::cmd::lists::POSITION;
 use redis_event::cmd::sorted_sets::AGGREGATE;
 use redis_event::cmd::strings::{ExistType, ExpireType, Op, Operation, Overflow};
 use redis_event::Event::{AOF, RDB};
@@ -235,18 +236,59 @@ impl EventHandlerImpl {
                 let cmd = redis::cmd("EXEC");
                 self.send(cmd);
             }
-            Command::FLUSHALL(_) => {}
-            Command::FLUSHDB(_) => {}
+            Command::FLUSHALL(flushall) => {
+                let mut cmd = redis::cmd("FLUSHALL");
+                if flushall._async.is_some() {
+                    cmd.arg("ASYNC");
+                }
+                self.send(cmd);
+            }
+            Command::FLUSHDB(flushdb) => {
+                let mut cmd = redis::cmd("FLUSHDB");
+                if flushdb._async.is_some() {
+                    cmd.arg("ASYNC");
+                }
+                self.send(cmd);
+            }
             Command::GETSET(getset) => {
                 let mut cmd = redis::cmd("GETSET");
                 cmd.arg(getset.key).arg(getset.value);
                 self.send(cmd);
             }
-            Command::HDEL(_) => {}
-            Command::HINCRBY(_) => {}
-            Command::HMSET(_) => {}
-            Command::HSET(_) => {}
-            Command::HSETNX(_) => {}
+            Command::HDEL(hdel) => {
+                let mut cmd = redis::cmd("HDEL");
+                cmd.arg(hdel.key);
+                for field in &hdel.fields {
+                    cmd.arg(*field);
+                }
+                self.send(cmd);
+            }
+            Command::HINCRBY(hincrby) => {
+                let mut cmd = redis::cmd("HINCRBY");
+                cmd.arg(hincrby.key).arg(hincrby.field).arg(hincrby.increment);
+                self.send(cmd);
+            }
+            Command::HMSET(hmset) => {
+                let mut cmd = redis::cmd("HMSET");
+                cmd.arg(hmset.key);
+                for field in &hmset.fields {
+                    cmd.arg(field.name).arg(field.value);
+                }
+                self.send(cmd);
+            }
+            Command::HSET(hset) => {
+                let mut cmd = redis::cmd("HSET");
+                cmd.arg(hset.key);
+                for field in &hset.fields {
+                    cmd.arg(field.name).arg(field.value);
+                }
+                self.send(cmd);
+            }
+            Command::HSETNX(hsetnx) => {
+                let mut cmd = redis::cmd("HSETNX");
+                cmd.arg(hsetnx.key).arg(hsetnx.field).arg(hsetnx.value);
+                self.send(cmd);
+            }
             Command::INCR(incr) => {
                 let mut cmd = redis::cmd("INCR");
                 cmd.arg(incr.key);
@@ -257,14 +299,61 @@ impl EventHandlerImpl {
                 cmd.arg(incrby.key).arg(incrby.increment);
                 self.send(cmd);
             }
-            Command::LINSERT(_) => {}
-            Command::LPOP(_) => {}
-            Command::LPUSH(_) => {}
-            Command::LPUSHX(_) => {}
-            Command::LREM(_) => {}
-            Command::LSET(_) => {}
-            Command::LTRIM(_) => {}
-            Command::MOVE(_) => {}
+            Command::LINSERT(linsert) => {
+                let mut cmd = redis::cmd("LINSERT");
+                cmd.arg(linsert.key);
+                match linsert.position {
+                    POSITION::BEFORE => {
+                        cmd.arg("BEFORE");
+                    }
+                    POSITION::AFTER => {
+                        cmd.arg("AFTER");
+                    }
+                }
+                cmd.arg(linsert.pivot).arg(linsert.element);
+                self.send(cmd);
+            }
+            Command::LPOP(lpop) => {
+                let mut cmd = redis::cmd("LPOP");
+                cmd.arg(lpop.key);
+                self.send(cmd);
+            }
+            Command::LPUSH(lpush) => {
+                let mut cmd = redis::cmd("LPUSH");
+                cmd.arg(lpush.key);
+                for element in &lpush.elements {
+                    cmd.arg(*element);
+                }
+                self.send(cmd);
+            }
+            Command::LPUSHX(lpushx) => {
+                let mut cmd = redis::cmd("LPUSHX");
+                cmd.arg(lpushx.key);
+                for element in &lpushx.elements {
+                    cmd.arg(*element);
+                }
+                self.send(cmd);
+            }
+            Command::LREM(lrem) => {
+                let mut cmd = redis::cmd("LREM");
+                cmd.arg(lrem.key).arg(lrem.count).arg(lrem.element);
+                self.send(cmd);
+            }
+            Command::LSET(lset) => {
+                let mut cmd = redis::cmd("LSET");
+                cmd.arg(lset.key).arg(lset.index).arg(lset.element);
+                self.send(cmd);
+            }
+            Command::LTRIM(ltrim) => {
+                let mut cmd = redis::cmd("LTRIM");
+                cmd.arg(ltrim.key).arg(ltrim.start).arg(ltrim.stop);
+                self.send(cmd);
+            }
+            Command::MOVE(_move) => {
+                let mut cmd = redis::cmd("MOVE");
+                cmd.arg(_move.key).arg(_move.db);
+                self.send(cmd);
+            }
             Command::MSET(mset) => {
                 let mut cmd = redis::cmd("MSET");
                 for kv in &mset.key_values {
@@ -283,12 +372,44 @@ impl EventHandlerImpl {
                 let cmd = redis::cmd("MULTI");
                 self.send(cmd);
             }
-            Command::PERSIST(_) => {}
-            Command::PEXPIRE(_) => {}
-            Command::PEXPIREAT(_) => {}
-            Command::PFADD(_) => {}
-            Command::PFCOUNT(_) => {}
-            Command::PFMERGE(_) => {}
+            Command::PERSIST(persist) => {
+                let mut cmd = redis::cmd("PERSIST");
+                cmd.arg(persist.key);
+                self.send(cmd);
+            }
+            Command::PEXPIRE(pexpire) => {
+                let mut cmd = redis::cmd("PEXPIRE");
+                cmd.arg(pexpire.milliseconds);
+                self.send(cmd);
+            }
+            Command::PEXPIREAT(pexpireat) => {
+                let mut cmd = redis::cmd("PEXPIREAT");
+                cmd.arg(pexpireat.mill_timestamp);
+                self.send(cmd);
+            }
+            Command::PFADD(pfadd) => {
+                let mut cmd = redis::cmd("PFADD");
+                cmd.arg(pfadd.key);
+                for element in &pfadd.elements {
+                    cmd.arg(*element);
+                }
+                self.send(cmd);
+            }
+            Command::PFCOUNT(pfcount) => {
+                let mut cmd = redis::cmd("PFCOUNT");
+                for key in &pfcount.keys {
+                    cmd.arg(*key);
+                }
+                self.send(cmd);
+            }
+            Command::PFMERGE(pfmerge) => {
+                let mut cmd = redis::cmd("PFMERGE");
+                cmd.arg(pfmerge.dest_key);
+                for key in &pfmerge.source_keys {
+                    cmd.arg(*key);
+                }
+                self.send(cmd);
+            }
             Command::PSETEX(psetex) => {
                 let mut cmd = redis::cmd("PSETEX");
                 cmd.arg(psetex.key).arg(psetex.milliseconds).arg(psetex.value);
