@@ -752,13 +752,13 @@ impl Drop for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: &str) -> EventHandlerImpl {
+pub(crate) fn new(target: &str, connect_timeout: Duration) -> EventHandlerImpl {
     let addr = target.to_string();
     let (sender, receiver) = mpsc::channel();
     let worker_thread = thread::spawn(move || {
         info!("Worker thread started");
         let client = redis::Client::open(addr).unwrap();
-        let mut conn = client.get_connection().expect("连接到目的Redis失败");
+        let mut conn = client.get_connection_with_timeout(connect_timeout).expect("连接到目的Redis失败");
         let mut pipeline = redis::pipe();
         let mut count = 0;
         let mut timer = Instant::now();
