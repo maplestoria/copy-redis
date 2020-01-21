@@ -112,7 +112,6 @@ impl EventHandlerImpl {
     }
     
     fn handle_aof(&mut self, cmd: Command) {
-        info!("{:?}", cmd);
         match cmd {
             Command::APPEND(append) => {
                 let mut cmd = redis::cmd("APPEND");
