@@ -807,7 +807,7 @@ pub(crate) fn new(target: String, connect_timeout: Duration, retry: u8, retry_in
                     exec_count += 1;
                 }
                 timer = Instant::now();
-                pipeline = redis::pipe();
+                pipeline.clear();
                 count = 0;
             }
             if shutdown {
