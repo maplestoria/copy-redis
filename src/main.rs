@@ -1,9 +1,9 @@
 extern crate ctrlc;
 extern crate getopts;
 
+use std::{env, thread};
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
-use std::env;
 use std::fs;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -50,7 +50,6 @@ fn run(opt: Opt) {
     let source_addr = socket_addr.to_string();
     
     let read_timeout = Duration::from_millis(opt.read_timeout);
-    let write_timeout = Duration::from_millis(opt.read_timeout);
     
     let mut config = redis_event::config::Config {
         is_discard_rdb: opt.discard_rdb,
@@ -60,11 +59,11 @@ fn run(opt: Opt) {
         repl_id: "?".to_string(),
         repl_offset: -1,
         read_timeout: Option::Some(read_timeout),
-        write_timeout: Option::Some(write_timeout),
+        write_timeout: Option::Some(Duration::from_millis(opt.write_timeout)),
     };
     
     if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
-        info!("获取到REPL历史记录信息, id: {}, offset: {}", repl_id, repl_offset);
+        info!("获取到PSYNC记录信息, id: {}, offset: {}", repl_id, repl_offset);
         config.repl_id = repl_id;
         config.repl_offset = repl_offset;
     }
@@ -74,21 +73,30 @@ fn run(opt: Opt) {
     // 等命令被handler处理完之后，listener才能结束，而且handler的结束还必须在listener之后，要不然丢数据
     let listener_running = Arc::new(AtomicBool::new(true));
     let r1 = listener_running.clone();
+    let r2 = listener_running.clone();
     ctrlc::set_handler(move || {
         r1.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
     
     let mut listener = standalone::new(config, listener_running);
     
-    let event_handler = handler::new(&opt.target, read_timeout);
+    let event_handler = handler::new(opt.target.to_string(), read_timeout, opt.retry, opt.retry_interval, r2);
     listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     
-    if let Err(error) = listener.open() {
-        error!("连接到源Redis错误: {}", error.to_string());
+    let mut retry_count = 0;
+    while retry_count <= opt.retry {
+        if let Err(error) = listener.open() {
+            error!("连接到源Redis错误: {}", error.to_string());
+            retry_count += 1;
+            thread::sleep(Duration::from_millis(opt.retry_interval));
+        } else {
+            break;
+        }
     }
+    
     // 程序正常退出时，保存repl id和offset
     if let Err(err) = save_repl_meta(&source_addr, &listener.config.repl_id, listener.config.repl_offset) {
-        error!("保存REPL信息失败:{}", err);
+        error!("保存PSYNC信息失败:{}", err);
     }
 }
 
@@ -108,7 +116,7 @@ fn load_repl_meta(source_addr: &str) -> io::Result<(String, i64)> {
             return Ok((id.to_string(), offset));
         }
     }
-    Err(Error::new(io::ErrorKind::InvalidData, "未能获取到有效的REPL历史信息"))
+    Err(Error::new(io::ErrorKind::InvalidData, "未能获取到有效的PSYNC记录信息"))
 }
 
 fn save_repl_meta(source_addr: &str, id: &str, offset: i64) -> io::Result<()> {
@@ -135,6 +143,8 @@ struct Opt {
     log_file: Option<String>,
     read_timeout: u64,
     write_timeout: u64,
+    retry: u8,
+    retry_interval: u64,
 }
 
 fn parse_args(args: Vec<String>) -> Opt {
@@ -143,9 +153,11 @@ fn parse_args(args: Vec<String>) -> Opt {
     opts.optopt("t", "target", "URI格式同上", "目的Redis的URI");
     opts.optflag("", "discard-rdb", "是否跳过整个RDB不进行复制, 默认为false, 复制完整的RDB");
     opts.optflag("", "aof", "是否需要处理AOF, 默认为false, 当RDB复制完后, 程序将终止");
-    opts.optopt("l", "log", "日志输出文件. 不指定此选项, 日志将输出至标准输出流", "");
-    opts.optopt("", "read-timeout", "不可为0", "读超时时间. 单位毫秒, 默认2000");
-    opts.optopt("", "write-timeout", "不可为0", "写超时时间. 单位毫秒, 默认2000");
+    opts.optopt("l", "log", "不指定此选项, 日志将输出至标准输出流", "日志输出文件");
+    opts.optopt("", "read-timeout", "单位毫秒, 默认2000. 不可为0", "读超时时间");
+    opts.optopt("", "write-timeout", "单位毫秒, 默认2000. 不可为0", "写超时时间");
+    opts.optopt("r", "retry", "默认5次. 最多重试255次", "失败重试次数");
+    opts.optopt("i", "retry-interval", "单位毫秒, 默认2000. 不可为0", "失败重试间隔时间");
     opts.optflag("h", "help", "输出帮助信息");
     
     let matches = match opts.parse(&args[1..]) {
@@ -175,12 +187,26 @@ fn parse_args(args: Vec<String>) -> Opt {
     let log_file = matches.opt_str("l");
     
     let mut read_timeout = 2000;
-    let mut write_timeout = 2000;
     if let Some(str) = matches.opt_str("read-timeout") {
         read_timeout = str.parse::<u64>().expect("超时时间应为有效的数字");
     }
+    
+    let mut write_timeout = 2000;
     if let Some(str) = matches.opt_str("write-timeout") {
         write_timeout = str.parse::<u64>().expect("超时时间应为有效的数字");
+    }
+    
+    let mut retry = 5;
+    if let Some(str) = matches.opt_str("retry") {
+        retry = str.parse::<u8>().expect("重试次数应为有效的数字");
+        if retry == 0 {
+            retry = 1;
+        }
+    }
+    
+    let retry_interval = 2000;
+    if let Some(str) = matches.opt_str("retry-interval") {
+        write_timeout = str.parse::<u64>().expect("重试间隔时间应为有效的数字");
     }
     
     return Opt {
@@ -191,6 +217,8 @@ fn parse_args(args: Vec<String>) -> Opt {
         log_file,
         read_timeout,
         write_timeout,
+        retry,
+        retry_interval,
     };
 }
 

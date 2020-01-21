@@ -1,10 +1,12 @@
-use std::sync::mpsc;
+use std::{io, thread};
+use std::io::{Error, ErrorKind};
+use std::sync::{Arc, mpsc};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
-use redis::Cmd;
+use redis::{Cmd, Connection, ConnectionLike};
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
 use redis_event::cmd::keys::ORDER;
@@ -751,13 +753,17 @@ impl Drop for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: &str, connect_timeout: Duration) -> EventHandlerImpl {
-    let addr = target.to_string();
+pub(crate) fn new(target: String, connect_timeout: Duration, retry: u8, retry_interval: u64, running: Arc<AtomicBool>) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
     let worker_thread = thread::spawn(move || {
         info!("Worker thread started");
-        let client = redis::Client::open(addr).unwrap();
-        let mut conn = client.get_connection_with_timeout(connect_timeout).expect("连接到目的Redis失败");
+        let mut conn = match connect(target.to_string(), connect_timeout, retry, retry_interval) {
+            Ok(conn) => conn,
+            Err(err) => {
+                running.store(false, Ordering::SeqCst);
+                panic!("{}", err);
+            }
+        };
         let mut pipeline = redis::pipe();
         let mut count = 0;
         let mut timer = Instant::now();
@@ -776,12 +782,30 @@ pub(crate) fn new(target: &str, connect_timeout: Duration) -> EventHandlerImpl {
             }
             let elapsed = timer.elapsed();
             if (elapsed.ge(&hundred_millis) && count > 0) || shutdown {
-                match pipeline.query(&mut conn) {
-                    Err(err) => {
-                        error!("数据写入失败: {}", err);
-                    }
-                    Ok(()) => info!("写入成功: {}", count)
-                };
+                let mut exec_count = 0;
+                while exec_count <= retry {
+                    match pipeline.query(&mut conn) {
+                        Err(err) => {
+                            error!("数据写入失败: {}", err);
+                            if !&conn.is_open() {
+                                conn = match connect(target.to_string(), connect_timeout, retry, retry_interval) {
+                                    Ok(conn) => conn,
+                                    Err(err) => {
+                                        running.store(false, Ordering::SeqCst);
+                                        panic!("{}", err);
+                                    }
+                                };
+                            } else {
+                                break;
+                            }
+                        }
+                        Ok(()) => {
+                            info!("写入成功: {}", count);
+                            break;
+                        }
+                    };
+                    exec_count += 1;
+                }
                 timer = Instant::now();
                 pipeline = redis::pipe();
                 count = 0;
@@ -797,6 +821,25 @@ pub(crate) fn new(target: &str, connect_timeout: Duration) -> EventHandlerImpl {
         sender,
         db: -1,
     }
+}
+
+fn connect(addr: String, connect_timeout: Duration, retry: u8, retry_interval: u64) -> io::Result<Connection> {
+    let client = redis::Client::open(addr).unwrap();
+    let mut count = 0;
+    while count <= retry {
+        match client.get_connection_with_timeout(connect_timeout) {
+            Ok(connection) => {
+                info!("连接到目的Redis成功");
+                return Ok(connection);
+            }
+            Err(err) => {
+                error!("连接到目的Redis失败: {}", err);
+                count += 1;
+                thread::sleep(Duration::from_millis(retry_interval));
+            }
+        }
+    }
+    Err(Error::new(ErrorKind::NotConnected, "无法连接到目的Redis"))
 }
 
 struct Worker {
