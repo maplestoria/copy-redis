@@ -60,14 +60,12 @@ impl EventHandlerImpl {
                     self.send(cmd);
                     self.db = list.meta.db;
                 }
-                if list.values.len() > 0 {
-                    let mut cmd = redis::cmd("rpush");
-                    cmd.arg(list.key);
-                    for val in list.values {
-                        cmd.arg(val.as_slice());
-                    }
-                    self.send(cmd);
+                let mut cmd = redis::cmd("rpush");
+                cmd.arg(list.key);
+                for val in list.values {
+                    cmd.arg(val.as_slice());
                 }
+                self.send(cmd);
             }
             Object::Set(set) => {
                 if set.meta.db != self.db {
@@ -76,14 +74,12 @@ impl EventHandlerImpl {
                     self.send(cmd);
                     self.db = set.meta.db;
                 }
-                if set.members.len() > 0 {
-                    let mut cmd = redis::cmd("sadd");
-                    cmd.arg(set.key);
-                    for member in set.members {
-                        cmd.arg(member.as_slice());
-                    }
-                    self.send(cmd);
+                let mut cmd = redis::cmd("sadd");
+                cmd.arg(set.key);
+                for member in set.members {
+                    cmd.arg(member.as_slice());
                 }
+                self.send(cmd);
             }
             Object::SortedSet(sorted_set) => {
                 if sorted_set.meta.db != self.db {
@@ -92,14 +88,12 @@ impl EventHandlerImpl {
                     self.send(cmd);
                     self.db = sorted_set.meta.db;
                 }
-                if sorted_set.items.len() > 0 {
-                    let mut cmd = redis::cmd("zadd");
-                    cmd.arg(sorted_set.key);
-                    for item in sorted_set.items {
-                        cmd.arg(item.score).arg(item.member.as_slice());
-                    }
-                    self.send(cmd);
+                let mut cmd = redis::cmd("zadd");
+                cmd.arg(sorted_set.key);
+                for item in sorted_set.items {
+                    cmd.arg(item.score).arg(item.member.as_slice());
                 }
+                self.send(cmd);
             }
             Object::Hash(hash) => {
                 if hash.meta.db != self.db {
@@ -108,14 +102,12 @@ impl EventHandlerImpl {
                     self.send(cmd);
                     self.db = hash.meta.db;
                 }
-                if hash.fields.len() > 0 {
-                    let mut cmd = redis::cmd("hmset");
-                    cmd.arg(hash.key);
-                    for field in hash.fields {
-                        cmd.arg(field.name.as_slice()).arg(field.value.as_slice());
-                    }
-                    self.send(cmd);
+                let mut cmd = redis::cmd("hmset");
+                cmd.arg(hash.key);
+                for field in hash.fields {
+                    cmd.arg(field.name.as_slice()).arg(field.value.as_slice());
                 }
+                self.send(cmd);
             }
             _ => {}
         }
