@@ -781,7 +781,7 @@ pub(crate) fn new(target: String, connect_timeout: Duration, retry: u8, retry_in
                 Err(_) => {}
             }
             let elapsed = timer.elapsed();
-            if (elapsed.ge(&hundred_millis) && count > 0) || shutdown {
+            if (elapsed.ge(&hundred_millis) || shutdown) && count > 0 {
                 let mut exec_count = 0;
                 while exec_count <= retry {
                     match pipeline.query(&mut conn) {
