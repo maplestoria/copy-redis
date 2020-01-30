@@ -85,7 +85,7 @@ fn run(opt: Opt) {
     
     let mut retry_count = 0;
     while retry_count <= opt.retry {
-        if let Err(error) = listener.open() {
+        if let Err(error) = listener.start() {
             error!("连接到源Redis错误: {}", error.to_string());
             retry_count += 1;
             thread::sleep(Duration::from_millis(opt.retry_interval));
