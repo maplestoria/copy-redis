@@ -147,6 +147,8 @@ struct Opt {
     retry_interval: u64,
 }
 
+const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 fn parse_args(args: Vec<String>) -> Opt {
     let mut opts = Options::new();
     opts.optopt("s", "source", "此Redis内的数据将复制到目的Redis中. URI格式形如: \"redis://[:password@]host:port\", 中括号及其内容可省略", "源Redis的URI");
@@ -159,6 +161,7 @@ fn parse_args(args: Vec<String>) -> Opt {
     opts.optopt("r", "retry", "默认5次. 最多重试255次", "失败重试次数");
     opts.optopt("i", "retry-interval", "单位毫秒, 默认2000. 不可为0", "失败重试间隔时间");
     opts.optflag("h", "help", "输出帮助信息");
+    opts.optflag("v", "version", "");
     
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -173,6 +176,10 @@ fn parse_args(args: Vec<String>) -> Opt {
         print_usage(&opts);
         exit(0);
     };
+    if matches.opts_present(&[String::from("v"), String::from("version")]) {
+        println!("copy-redis {}", VERSION);
+        exit(0);
+    }
     
     let (source, target) = if matches.opt_present("s") && matches.opt_present("t") {
         (matches.opt_str("s").unwrap(), matches.opt_str("t").unwrap())
