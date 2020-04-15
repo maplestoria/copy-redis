@@ -49,7 +49,17 @@ fn run(opt: Opt) {
     }
     let source_addr = socket_addr.to_string();
     
-    let read_timeout = Duration::from_millis(opt.read_timeout);
+    let read_timeout = if opt.read_timeout <= 0 {
+        None
+    } else {
+        Option::Some(Duration::from_millis(opt.read_timeout))
+    };
+    
+    let write_timeout = if opt.write_timeout <= 0 {
+        None
+    } else {
+        Option::Some(Duration::from_millis(opt.write_timeout))
+    };
     
     let mut config = redis_event::config::Config {
         is_discard_rdb: opt.discard_rdb,
@@ -58,8 +68,8 @@ fn run(opt: Opt) {
         password: source.passwd.unwrap_or_default(),
         repl_id: "?".to_string(),
         repl_offset: -1,
-        read_timeout: Option::Some(read_timeout),
-        write_timeout: Option::Some(Duration::from_millis(opt.write_timeout)),
+        read_timeout,
+        write_timeout,
     };
     
     if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
@@ -156,10 +166,10 @@ fn parse_args(args: Vec<String>) -> Opt {
     opts.optflag("", "discard-rdb", "是否跳过整个RDB不进行复制, 默认为false, 复制完整的RDB");
     opts.optflag("", "aof", "是否需要处理AOF, 默认为false, 当RDB复制完后, 程序将终止");
     opts.optopt("l", "log", "不指定此选项, 日志将输出至标准输出流", "日志输出文件");
-    opts.optopt("", "read-timeout", "单位毫秒, 默认2000. 不可为0", "读超时时间");
-    opts.optopt("", "write-timeout", "单位毫秒, 默认2000. 不可为0", "写超时时间");
+    opts.optopt("", "read-timeout", "默认0, 永不超时", "读超时时间, 单位毫秒");
+    opts.optopt("", "write-timeout", "默认0, 永不超时", "写超时时间, 单位毫秒");
     opts.optopt("r", "retry", "默认5次. 最多重试255次", "失败重试次数");
-    opts.optopt("i", "retry-interval", "单位毫秒, 默认2000. 不可为0", "失败重试间隔时间");
+    opts.optopt("i", "retry-interval", "默认2000. 不可为0", "失败重试间隔时间, 单位毫秒");
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
     
@@ -193,12 +203,12 @@ fn parse_args(args: Vec<String>) -> Opt {
     let aof = matches.opt_present("aof");
     let log_file = matches.opt_str("l");
     
-    let mut read_timeout = 2000;
+    let mut read_timeout = 0;
     if let Some(str) = matches.opt_str("read-timeout") {
         read_timeout = str.parse::<u64>().expect("超时时间应为有效的数字");
     }
     
-    let mut write_timeout = 2000;
+    let mut write_timeout = 0;
     if let Some(str) = matches.opt_str("write-timeout") {
         write_timeout = str.parse::<u64>().expect("超时时间应为有效的数字");
     }

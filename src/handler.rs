@@ -753,7 +753,7 @@ impl Drop for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: String, connect_timeout: Duration, retry: u8, retry_interval: u64, running: Arc<AtomicBool>) -> EventHandlerImpl {
+pub(crate) fn new(target: String, connect_timeout: Option<Duration>, retry: u8, retry_interval: u64, running: Arc<AtomicBool>) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
     let worker_thread = thread::spawn(move || {
         info!("Worker thread started");
@@ -823,11 +823,16 @@ pub(crate) fn new(target: String, connect_timeout: Duration, retry: u8, retry_in
     }
 }
 
-fn connect(addr: String, connect_timeout: Duration, retry: u8, retry_interval: u64) -> io::Result<Connection> {
+fn connect(addr: String, connect_timeout: Option<Duration>, retry: u8, retry_interval: u64) -> io::Result<Connection> {
     let client = redis::Client::open(addr).unwrap();
     let mut count = 0;
     while count <= retry {
-        match client.get_connection_with_timeout(connect_timeout) {
+        let connect_result = if connect_timeout.is_some() {
+            client.get_connection_with_timeout(connect_timeout.unwrap())
+        } else {
+            client.get_connection()
+        };
+        match connect_result {
             Ok(connection) => {
                 info!("连接到目的Redis成功");
                 return Ok(connection);
