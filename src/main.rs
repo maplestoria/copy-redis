@@ -24,6 +24,7 @@ use redis_event::listener::standalone;
 use redis_event::RedisListener;
 
 mod handler;
+mod sharding;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -34,11 +35,6 @@ fn main() {
 
 fn run(opt: Opt) {
     let source = opt.source.into_connection_info().expect("源Redis URI无效");
-    let target = opt.target.clone().into_connection_info().expect("目的Redis URI无效");
-    if source.addr == target.addr {
-        panic!("Error: 源Redis地址不能与目的Redis地址相同");
-    }
-    
     let socket_addr;
     if let ConnectionAddr::Tcp(host, port) = source.addr.as_ref() {
         let addr = format!("{}:{}", host, port);
@@ -90,7 +86,18 @@ fn run(opt: Opt) {
     
     let mut listener = standalone::new(config, listener_running);
     
-    let event_handler = handler::new(opt.target.to_string(), read_timeout, opt.retry, opt.retry_interval, r2);
+    let event_handler;
+    if opt.targets.len() > 1 {
+        if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }
+        if opt.sharding {
+            event_handler = handler::new_sharded(opt.targets, r2);
+        } else {
+            event_handler = handler::new_cluster(opt.targets, r2);
+        }
+    } else {
+        event_handler = handler::new(opt.targets.get(0).unwrap().to_string(), read_timeout, r2);
+    }
+    
     listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     
     let mut retry_count = 0;
@@ -147,7 +154,7 @@ fn save_repl_meta(source_addr: &str, id: &str, offset: i64) -> io::Result<()> {
 #[derive(Debug)]
 struct Opt {
     source: String,
-    target: String,
+    targets: Vec<String>,
     discard_rdb: bool,
     aof: bool,
     log_file: Option<String>,
@@ -155,6 +162,8 @@ struct Opt {
     write_timeout: u64,
     retry: u8,
     retry_interval: u64,
+    sharding: bool,
+    cluster: bool,
 }
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -162,9 +171,11 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 fn parse_args(args: Vec<String>) -> Opt {
     let mut opts = Options::new();
     opts.optopt("s", "source", "此Redis内的数据将复制到目的Redis中. URI格式形如: \"redis://[:password@]host:port\", 中括号及其内容可省略", "源Redis的URI");
-    opts.optopt("t", "target", "URI格式同上", "目的Redis的URI");
+    opts.optmulti("t", "target", "URI格式同上", "目的Redis的URI");
     opts.optflag("", "discard-rdb", "是否跳过整个RDB不进行复制, 默认为false, 复制完整的RDB");
     opts.optflag("", "aof", "是否需要处理AOF, 默认为false, 当RDB复制完后, 程序将终止");
+    opts.optflag("", "sharding", "是否是shard模式");
+    opts.optflag("", "cluster", "是否是cluster模式");
     opts.optopt("l", "log", "不指定此选项, 日志将输出至标准输出流", "日志输出文件");
     opts.optopt("", "read-timeout", "默认0, 永不超时", "读超时时间, 单位毫秒");
     opts.optopt("", "write-timeout", "默认0, 永不超时", "写超时时间, 单位毫秒");
@@ -191,8 +202,8 @@ fn parse_args(args: Vec<String>) -> Opt {
         exit(0);
     }
     
-    let (source, target) = if matches.opt_present("s") && matches.opt_present("t") {
-        (matches.opt_str("s").unwrap(), matches.opt_str("t").unwrap())
+    let (source, targets) = if matches.opt_present("s") && matches.opt_present("t") {
+        (matches.opt_str("s").unwrap(), matches.opt_strs("t"))
     } else {
         eprint!("Error: {}\r\n\r\n", "请同时指定source与target参数");
         print_usage(&opts);
@@ -200,6 +211,8 @@ fn parse_args(args: Vec<String>) -> Opt {
     };
     
     let discard_rdb = matches.opt_present("discard-rdb");
+    let sharding = matches.opt_present("sharding");
+    let cluster = matches.opt_present("cluster");
     let aof = matches.opt_present("aof");
     let log_file = matches.opt_str("l");
     
@@ -228,12 +241,14 @@ fn parse_args(args: Vec<String>) -> Opt {
     
     return Opt {
         source,
-        target,
+        targets,
         discard_rdb,
         aof,
         log_file,
         read_timeout,
         write_timeout,
+        sharding,
+        cluster,
         retry,
         retry_interval,
     };

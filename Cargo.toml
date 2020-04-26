@@ -1,6 +1,6 @@
 [package]
 name = "copy-redis"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["maplestoria <zkx6648@gmail.com>"]
 edition = "2018"
 
@@ -12,5 +12,6 @@ log = "0.4.0"
 fern = "0.5"
 chrono = "0.4"
 getopts = "0.2"
-redis = "0.15.1"
+redis = { version = "0.15.1", features = ["cluster"] }
 ctrlc = { version = "3.0", features = ["termination"] }
+murmurhash64 = "0.3.1"
