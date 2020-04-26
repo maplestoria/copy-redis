@@ -65,7 +65,7 @@ impl ShardedClient {
 mod tests {
     use crate::sharding::ShardedClient;
     
-    #[test]
+    // #[test]
     fn test_client() {
         let nodes = vec!["redis://127.0.0.1:6379/", "redis://127.0.0.1:6479/"];
         let client = ShardedClient::open(nodes).unwrap();

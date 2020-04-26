@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use log::{error, info};
-use redis::{Cmd, Connection, ConnectionLike};
+use log::info;
+use redis::{Cmd, Connection};
 use redis::cluster::ClusterClient;
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
@@ -39,7 +39,9 @@ impl EventHandler for EventHandlerImpl {
 
 impl EventHandlerImpl {
     fn send(&mut self, cmd: Cmd) {
-        self.sender.send(Message::Cmd(cmd)).expect("发送消息失败");
+        if let Err(err) = self.sender.send(Message::Cmd(cmd)) {
+            panic!("{}", err)
+        }
     }
     
     fn handle_rdb(&mut self, rdb: Object) {
@@ -857,22 +859,10 @@ pub(crate) fn new(target: String, connect_timeout: Option<Duration>, running: Ar
             if (elapsed.ge(&hundred_millis) || shutdown) && count > 0 {
                 match pipeline.query(&mut conn) {
                     Err(err) => {
-                        error!("数据写入失败: {}", err);
-                        if !&conn.is_open() {
-                            conn = match connect(target.to_string(), connect_timeout) {
-                                Ok(conn) => conn,
-                                Err(err) => {
-                                    running.store(false, Ordering::SeqCst);
-                                    panic!("{}", err);
-                                }
-                            };
-                        } else {
-                            break;
-                        }
+                        panic!("数据写入失败: {}", err);
                     }
                     Ok(()) => {
                         info!("写入成功: {}", count);
-                        break;
                     }
                 };
                 timer = Instant::now();
