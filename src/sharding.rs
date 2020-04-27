@@ -4,13 +4,15 @@ use std::sync::{Arc, mpsc};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
+use log::info;
 use murmurhash64::murmur_hash64a;
-use redis::{Arg, ConnectionAddr, IntoConnectionInfo};
+use redis::{Arg, Cmd, ConnectionAddr, IntoConnectionInfo};
 use redis_event::{Event, EventHandler};
+use redis_event::cmd::Command;
 use redis_event::Event::{AOF, RDB};
 
 use crate::command::CommandConverter;
-use crate::handler::{Message, Worker};
+use crate::worker::{Message, Worker};
 use crate::worker::new_worker;
 
 const SEED: u64 = 0x1234ABCD;
@@ -28,9 +30,42 @@ impl EventHandler for ShardedEventHandler {
                 self.handle_rdb(rdb)
             }
             AOF(cmd) => {
-                self.handle_aof(cmd)
+                match cmd {
+                    Command::SELECT(select) => {
+                        info!("所有shard切换至db: {}", select.db);
+                        self.select_db(select.db);
+                        None
+                    }
+                    _ => self.handle_aof(cmd)
+                }
             }
         };
+        self.execute(cmd);
+    }
+}
+
+impl ShardedEventHandler {
+    fn get_shard(&self, key: &[u8]) -> Option<String> {
+        let hash = murmur_hash64a(key, SEED);
+        if let Some((_, node)) = self.nodes.range(hash..).next() {
+            Some(node.clone())
+        } else {
+            None
+        }
+    }
+    
+    fn select_db(&self, db: i32) {
+        let senders = self.senders.borrow();
+        for (_, sender) in senders.iter() {
+            let mut cmd = redis::cmd("SELECT");
+            cmd.arg(db);
+            if let Err(err) = sender.send(Message::Cmd(cmd)) {
+                panic!("{}", err)
+            }
+        }
+    }
+    
+    fn execute(&self, cmd: Option<Cmd>) {
         if let Some(cmd) = cmd {
             let key = match cmd.args_iter().skip(1).next() {
                 None => panic!("cmd args is empty"),
@@ -58,17 +93,6 @@ impl EventHandler for ShardedEventHandler {
                     }
                 }
             }
-        }
-    }
-}
-
-impl ShardedEventHandler {
-    fn get_shard(&self, key: &[u8]) -> Option<String> {
-        let hash = murmur_hash64a(key, SEED);
-        if let Some((_, node)) = self.nodes.range(hash..).next() {
-            Some(node.clone())
-        } else {
-            None
         }
     }
 }

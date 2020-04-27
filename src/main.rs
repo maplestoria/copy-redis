@@ -83,7 +83,7 @@ fn run(opt: Opt) {
     let r1 = listener_running.clone();
     let r2 = listener_running.clone();
     ctrlc::set_handler(move || {
-        info!("接收到Ctrl-C信号, 准备退出程序...");
+        info!("接收到Ctrl-C信号, 等待程序退出...");
         r1.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
     

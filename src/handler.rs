@@ -11,6 +11,7 @@ use redis_event::Event::{AOF, RDB};
 
 use crate::command::CommandConverter;
 use crate::worker;
+use crate::worker::{Message, Worker};
 
 pub(crate) struct EventHandlerImpl {
     worker: Worker,
@@ -51,15 +52,6 @@ pub(crate) fn new(target: String, running: Arc<AtomicBool>) -> EventHandlerImpl 
         worker: Worker { thread: Option::Some(worker_thread) },
         sender,
     }
-}
-
-pub(crate) struct Worker {
-    pub(crate) thread: Option<thread::JoinHandle<()>>
-}
-
-pub(crate) enum Message {
-    Cmd(redis::Cmd),
-    Terminate,
 }
 
 pub(crate) fn new_cluster(target: Vec<String>, running: Arc<AtomicBool>) -> EventHandlerImpl {

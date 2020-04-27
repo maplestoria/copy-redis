@@ -1,11 +1,19 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use log::info;
-use crate::handler::Message;
-use std::sync::mpsc::Receiver;
+
+pub(crate) struct Worker {
+    pub(crate) thread: Option<thread::JoinHandle<()>>
+}
+
+pub(crate) enum Message {
+    Cmd(redis::Cmd),
+    Terminate,
+}
 
 pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Receiver<Message>) -> thread::JoinHandle<()> {
     let worker = thread::spawn(move || {
