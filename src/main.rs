@@ -81,13 +81,14 @@ fn run(opt: Opt) {
     let r1 = listener_running.clone();
     let r2 = listener_running.clone();
     ctrlc::set_handler(move || {
+        info!("接收到Ctrl-C信号, 准备退出程序...");
         r1.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
     
     let mut listener = standalone::new(config, listener_running);
     
     let event_handler;
-    if opt.targets.len() > 1 {
+    if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }
         if opt.sharding {
             event_handler = handler::new_sharded(opt.targets, r2);
@@ -121,7 +122,7 @@ fn load_repl_meta(source_addr: &str) -> io::Result<(String, i64)> {
     let mut s = DefaultHasher::new();
     source_addr.hash(&mut s);
     let hash = s.finish();
-    let path = format!(".copy_redis/{}", hash);
+    let path = format!("{}/{}", METADATA, hash);
     let mut file = File::open(PathBuf::from(path))?;
     let mut buf = String::new();
     file.read_to_string(&mut buf)?;
@@ -140,9 +141,9 @@ fn save_repl_meta(source_addr: &str, id: &str, offset: i64) -> io::Result<()> {
     let mut s = DefaultHasher::new();
     source_addr.hash(&mut s);
     let hash = s.finish();
-    let path = format!(".copy_redis/{}", hash);
-    if let Err(_) = fs::metadata(".copy_redis") {
-        fs::create_dir(".copy_redis")?;
+    let path = format!("{}/{}", METADATA, hash);
+    if let Err(_) = fs::metadata(METADATA) {
+        fs::create_dir(METADATA)?;
     }
     let mut file = File::create(PathBuf::from(path))?;
     let meta = format!("{},{}", id, offset);
@@ -166,6 +167,7 @@ struct Opt {
     cluster: bool,
 }
 
+const METADATA: &'static str = ".copy-redis";
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 fn parse_args(args: Vec<String>) -> Opt {
@@ -205,7 +207,7 @@ fn parse_args(args: Vec<String>) -> Opt {
     let (source, targets) = if matches.opt_present("s") && matches.opt_present("t") {
         (matches.opt_str("s").unwrap(), matches.opt_strs("t"))
     } else {
-        eprint!("Error: {}\r\n\r\n", "请同时指定source与target参数");
+        eprint!("Error: {}\r\n\r\n", "请指定source与target参数");
         print_usage(&opts);
         exit(1);
     };

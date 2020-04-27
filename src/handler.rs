@@ -241,20 +241,8 @@ impl EventHandlerImpl {
                 let cmd = redis::cmd("EXEC");
                 self.send(cmd);
             }
-            Command::FLUSHALL(flushall) => {
-                let mut cmd = redis::cmd("FLUSHALL");
-                if flushall._async.is_some() {
-                    cmd.arg("ASYNC");
-                }
-                self.send(cmd);
-            }
-            Command::FLUSHDB(flushdb) => {
-                let mut cmd = redis::cmd("FLUSHDB");
-                if flushdb._async.is_some() {
-                    cmd.arg("ASYNC");
-                }
-                self.send(cmd);
-            }
+            Command::FLUSHALL(_) => {}
+            Command::FLUSHDB(_) => {}
             Command::GETSET(getset) => {
                 let mut cmd = redis::cmd("GETSET");
                 cmd.arg(getset.key).arg(getset.value);
@@ -770,7 +758,7 @@ pub(crate) fn new_sharded(target: Vec<String>, running: Arc<AtomicBool>) -> Even
             }
         };
         loop {
-            match receiver.recv_timeout(Duration::from_millis(1)) {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(Message::Cmd(cmd)) => {
                     client.execute(cmd);
                 }
@@ -805,7 +793,7 @@ pub(crate) fn new_cluster(target: Vec<String>, running: Arc<AtomicBool>) -> Even
             }
         };
         loop {
-            match receiver.recv_timeout(Duration::from_millis(1)) {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(Message::Cmd(cmd)) => {
                     let mut conn = client.get_connection().expect("获取ClusterConnection失败");
                     cmd.execute(&mut conn);
@@ -845,7 +833,7 @@ pub(crate) fn new(target: String, connect_timeout: Option<Duration>, running: Ar
         let hundred_millis = Duration::from_millis(100);
         let mut shutdown = false;
         loop {
-            match receiver.recv_timeout(Duration::from_millis(1)) {
+            match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(Message::Cmd(cmd)) => {
                     pipeline.add_command(cmd);
                     count += 1;

@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
+use log::info;
 use murmurhash64::murmur_hash64a;
 use redis::{Arg, Cmd, Connection, ConnectionAddr, IntoConnectionInfo, RedisResult};
 
@@ -23,7 +24,7 @@ impl ShardedClient {
             };
             let client = redis::Client::open(info)?;
             let conn = client.get_connection()?;
-            
+            info!("connected to server {}", addr);
             for n in 0..160 {
                 let name = format!("SHARD-{}-NODE-{}", i, n);
                 let hash = murmur_hash64a(name.as_bytes(), SEED);
@@ -36,26 +37,24 @@ impl ShardedClient {
     
     pub fn execute(&self, cmd: Cmd) {
         let key = match cmd.args_iter().skip(1).next() {
-            None => { panic!("cmd args is empty") }
+            None => panic!("cmd args is empty"),
             Some(arg) => {
                 match arg {
-                    Arg::Simple(arg) => { arg }
-                    Arg::Cursor => { panic!("cmd first arg is cursor") }
+                    Arg::Simple(arg) => arg,
+                    Arg::Cursor => panic!("cmd first arg is cursor")
                 }
             }
         };
-        println!("{}", String::from_utf8_lossy(key));
-        
         let hash = murmur_hash64a(key, SEED);
         let conn;
-        let mut entry = self.resources.borrow_mut();
-        let mut values = entry.values_mut().next();
+        let mut resources = self.resources.borrow_mut();
+        let mut first_entry = resources.values_mut().next();
         let option;
         if let Some((_, node)) = self.nodes.range(hash..).next() {
-            option = entry.get_mut(node);
+            option = resources.get_mut(node);
             conn = option.unwrap();
         } else {
-            conn = values.as_mut().unwrap();
+            conn = first_entry.as_mut().unwrap();
         }
         cmd.execute(conn);
     }
@@ -65,7 +64,7 @@ impl ShardedClient {
 mod tests {
     use crate::sharding::ShardedClient;
     
-    // #[test]
+    #[test]
     fn test_client() {
         let nodes = vec!["redis://127.0.0.1:6379/", "redis://127.0.0.1:6479/"];
         let client = ShardedClient::open(nodes).unwrap();
