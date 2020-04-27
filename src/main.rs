@@ -25,6 +25,7 @@ use redis_event::RedisListener;
 
 mod handler;
 mod sharding;
+mod command;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
