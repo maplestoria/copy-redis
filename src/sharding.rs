@@ -128,7 +128,8 @@ pub(crate) fn new_sharded(initial_nodes: Vec<String>, running: Arc<AtomicBool>) 
             nodes.insert(hash, addr.clone());
         }
         let (sender, receiver) = mpsc::channel();
-        let worker = new_worker(node.clone(), running.clone(), receiver);
+        let worker_name = format!("shard-{}-{}", i, addr);
+        let worker = new_worker(node.clone(), running.clone(), receiver, &worker_name);
         senders.insert(addr, sender);
         workers.push(Worker { thread: Some(worker) });
     }

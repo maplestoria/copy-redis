@@ -15,9 +15,13 @@ pub(crate) enum Message {
     Terminate,
 }
 
-pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Receiver<Message>) -> thread::JoinHandle<()> {
-    let worker = thread::spawn(move || {
-        info!("Worker thread started");
+pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Receiver<Message>, name: &str) -> thread::JoinHandle<()> {
+    let builder = thread::Builder::new()
+        .name(name.into());
+    let worker = builder.spawn(move || {
+        let handle = thread::current();
+        let t_name = handle.name().unwrap();
+        info!(target: t_name, "Worker thread started");
         let client = redis::Client::open(target).unwrap();
         let mut conn = match client.get_connection() {
             Ok(conn) => conn,
@@ -49,7 +53,7 @@ pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Rec
                         panic!("数据写入失败: {}", err);
                     }
                     Ok(()) => {
-                        info!("写入成功: {}", count);
+                        info!(target: t_name, "写入成功: {}", count);
                     }
                 };
                 timer = Instant::now();
@@ -60,7 +64,7 @@ pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Rec
                 break;
             };
         }
-        info!("Worker thread terminated");
-    });
+        info!(target: t_name, "Worker thread terminated");
+    }).unwrap();
     return worker;
 }
