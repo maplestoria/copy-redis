@@ -26,6 +26,7 @@ use redis_event::RedisListener;
 mod handler;
 mod sharding;
 mod command;
+mod worker;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -88,19 +89,19 @@ fn run(opt: Opt) {
     
     let mut listener = standalone::new(config, listener_running);
     
-    let event_handler;
     if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }
         if opt.sharding {
-            event_handler = handler::new_sharded(opt.targets, r2);
+            let event_handler = sharding::new_sharded(opt.targets, r2);
+            listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
-            event_handler = handler::new_cluster(opt.targets, r2);
+            let event_handler = handler::new_cluster(opt.targets, r2);
+            listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         }
     } else {
-        event_handler = handler::new(opt.targets.get(0).unwrap().to_string(), read_timeout, r2);
+        let event_handler = handler::new(opt.targets.get(0).unwrap().to_string(), r2);
+        listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     }
-    
-    listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     
     let mut retry_count = 0;
     while retry_count <= opt.retry {
@@ -270,10 +271,10 @@ fn setup_logger(log_file: &Option<String>) -> Result<(), fern::InitError> {
     let log_format = fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S%.3f]"),
-                record.target(),
+                "{} {} {} - {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
                 record.level(),
+                record.target(),
                 message
             ))
         });

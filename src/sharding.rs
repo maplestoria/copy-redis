@@ -1,62 +1,117 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, mpsc};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Sender;
 
-use log::info;
 use murmurhash64::murmur_hash64a;
-use redis::{Arg, Cmd, Connection, ConnectionAddr, IntoConnectionInfo, RedisResult};
+use redis::{Arg, ConnectionAddr, IntoConnectionInfo};
+use redis_event::{Event, EventHandler};
+use redis_event::Event::{AOF, RDB};
+
+use crate::command::CommandConverter;
+use crate::handler::{Message, Worker};
+use crate::worker::new_worker;
 
 const SEED: u64 = 0x1234ABCD;
 
-pub struct ShardedClient {
+pub struct ShardedEventHandler {
+    workers: Vec<Worker>,
     nodes: BTreeMap<u64, String>,
-    resources: RefCell<HashMap<String, Connection>>,
+    senders: RefCell<HashMap<String, Sender<Message>>>,
 }
 
-impl ShardedClient {
-    pub fn open<T: IntoConnectionInfo>(initial_nodes: Vec<T>) -> RedisResult<ShardedClient> {
-        let mut connections: HashMap<String, Connection> = HashMap::with_capacity(initial_nodes.len());
-        let mut nodes: BTreeMap<u64, String> = BTreeMap::new();
-        for (i, node) in initial_nodes.into_iter().enumerate() {
-            let info = node.into_connection_info()?;
-            let addr = match *info.addr {
-                ConnectionAddr::Tcp(ref host, port) => format!("{}:{}", host, port),
-                _ => panic!("No reach."),
-            };
-            let client = redis::Client::open(info)?;
-            let conn = client.get_connection()?;
-            info!("connected to server {}", addr);
-            for n in 0..160 {
-                let name = format!("SHARD-{}-NODE-{}", i, n);
-                let hash = murmur_hash64a(name.as_bytes(), SEED);
-                nodes.insert(hash, addr.clone());
+impl EventHandler for ShardedEventHandler {
+    fn handle(&mut self, event: Event) {
+        let cmd = match event {
+            RDB(rdb) => {
+                self.handle_rdb(rdb)
             }
-            connections.insert(addr, conn);
-        }
-        Ok(ShardedClient { nodes, resources: RefCell::new(connections) })
-    }
-    
-    pub fn execute(&self, cmd: Cmd) {
-        let key = match cmd.args_iter().skip(1).next() {
-            None => panic!("cmd args is empty"),
-            Some(arg) => {
-                match arg {
-                    Arg::Simple(arg) => arg,
-                    Arg::Cursor => panic!("cmd first arg is cursor")
-                }
+            AOF(cmd) => {
+                self.handle_aof(cmd)
             }
         };
-        let hash = murmur_hash64a(key, SEED);
-        let conn;
-        let mut resources = self.resources.borrow_mut();
-        let mut first_entry = resources.values_mut().next();
-        let option;
-        if let Some((_, node)) = self.nodes.range(hash..).next() {
-            option = resources.get_mut(node);
-            conn = option.unwrap();
-        } else {
-            conn = first_entry.as_mut().unwrap();
+        if let Some(cmd) = cmd {
+            let key = match cmd.args_iter().skip(1).next() {
+                None => panic!("cmd args is empty"),
+                Some(arg) => {
+                    match arg {
+                        Arg::Simple(arg) => arg,
+                        Arg::Cursor => panic!("cmd first arg is cursor")
+                    }
+                }
+            };
+            let senders = self.senders.borrow();
+            let first_sender = senders.values().next();
+            match self.get_shard(key) {
+                None => {
+                    let sender = first_sender.unwrap();
+                    if let Err(err) = sender.send(Message::Cmd(cmd)) {
+                        panic!("{}", err)
+                    }
+                }
+                Some(node) => {
+                    let sender = senders.get(&node);
+                    let sender = sender.unwrap();
+                    if let Err(err) = sender.send(Message::Cmd(cmd)) {
+                        panic!("{}", err)
+                    }
+                }
+            }
         }
-        cmd.execute(conn);
+    }
+}
+
+impl ShardedEventHandler {
+    fn get_shard(&self, key: &[u8]) -> Option<String> {
+        let hash = murmur_hash64a(key, SEED);
+        if let Some((_, node)) = self.nodes.range(hash..).next() {
+            Some(node.clone())
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for ShardedEventHandler {
+    fn drop(&mut self) {
+        let senders = self.senders.borrow();
+        for (_, sender) in senders.iter() {
+            if let Err(_) = sender.send(Message::Terminate) {}
+        }
+        for worker in self.workers.iter_mut() {
+            if let Some(thread) = worker.thread.take() {
+                if let Err(_) = thread.join() {}
+            }
+        }
+    }
+}
+
+pub(crate) fn new_sharded(initial_nodes: Vec<String>, running: Arc<AtomicBool>) -> ShardedEventHandler {
+    let mut senders: HashMap<String, Sender<Message>> = HashMap::with_capacity(initial_nodes.len());
+    let mut workers = Vec::new();
+    let mut nodes: BTreeMap<u64, String> = BTreeMap::new();
+    
+    for (i, node) in initial_nodes.into_iter().enumerate() {
+        let info = node.as_str().into_connection_info().unwrap();
+        let addr = match *info.addr {
+            ConnectionAddr::Tcp(ref host, port) => format!("{}:{}", host, port),
+            _ => panic!("No reach."),
+        };
+        for n in 0..160 {
+            let name = format!("SHARD-{}-NODE-{}", i, n);
+            let hash = murmur_hash64a(name.as_bytes(), SEED);
+            nodes.insert(hash, addr.clone());
+        }
+        let (sender, receiver) = mpsc::channel();
+        let worker = new_worker(node.clone(), running.clone(), receiver);
+        senders.insert(addr, sender);
+        workers.push(Worker { thread: Some(worker) });
+    }
+    ShardedEventHandler {
+        workers,
+        nodes,
+        senders: RefCell::new(senders),
     }
 }
 
