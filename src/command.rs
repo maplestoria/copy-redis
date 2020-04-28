@@ -421,12 +421,13 @@ pub trait CommandConverter {
                 return Some(cmd);
             }
             Command::SCRIPTFLUSH => {
-                let cmd = redis::cmd("SCRIPT FLUSH");
+                let mut cmd = redis::cmd("SCRIPT");
+                cmd.arg("FLUSH");
                 return Some(cmd);
             }
             Command::SCRIPTLOAD(scriptload) => {
-                let mut cmd = redis::cmd("SCRIPT LOAD");
-                cmd.arg(scriptload.script);
+                let mut cmd = redis::cmd("SCRIPT");
+                cmd.arg("LOAD").arg(scriptload.script);
                 return Some(cmd);
             }
             Command::SDIFFSTORE(sdiffstore) => {

@@ -77,11 +77,11 @@ impl EventHandler for ShardedEventHandler {
                         None
                     }
                     Command::SCRIPTFLUSH => {
-                        self.broadcast("SCRIPT FLUSH", None);
+                        self.broadcast("SCRIPT", Some(&vec!["FLUSH".as_bytes()]));
                         None
                     }
                     Command::SCRIPTLOAD(scriptload) => {
-                        self.broadcast("SCRIPT LOAD", Some(&vec![scriptload.script]));
+                        self.broadcast("SCRIPT", Some(&vec!["LOAD".as_bytes(), scriptload.script]));
                         None
                     }
                     Command::SWAPDB(swapdb) => {
