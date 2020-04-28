@@ -48,18 +48,6 @@ fn run(opt: Opt) {
     }
     let source_addr = socket_addr.to_string();
     
-    let read_timeout = if opt.read_timeout <= 0 {
-        None
-    } else {
-        Option::Some(Duration::from_millis(opt.read_timeout))
-    };
-    
-    let write_timeout = if opt.write_timeout <= 0 {
-        None
-    } else {
-        Option::Some(Duration::from_millis(opt.write_timeout))
-    };
-    
     let mut config = redis_event::config::Config {
         is_discard_rdb: opt.discard_rdb,
         is_aof: opt.aof,
@@ -67,8 +55,8 @@ fn run(opt: Opt) {
         password: source.passwd.unwrap_or_default(),
         repl_id: "?".to_string(),
         repl_offset: -1,
-        read_timeout,
-        write_timeout,
+        read_timeout: None,
+        write_timeout: None,
     };
     
     if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
@@ -104,12 +92,10 @@ fn run(opt: Opt) {
         listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     }
     
-    let mut retry_count = 0;
-    while retry_count <= opt.retry {
+    loop {
         if let Err(error) = listener.start() {
             error!("连接到源Redis错误: {}", error.to_string());
-            retry_count += 1;
-            thread::sleep(Duration::from_millis(opt.retry_interval));
+            thread::sleep(Duration::from_millis(2000));
         } else {
             break;
         }
@@ -162,10 +148,6 @@ struct Opt {
     discard_rdb: bool,
     aof: bool,
     log_file: Option<String>,
-    read_timeout: u64,
-    write_timeout: u64,
-    retry: u8,
-    retry_interval: u64,
     sharding: bool,
     cluster: bool,
 }
@@ -175,17 +157,13 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 fn parse_args(args: Vec<String>) -> Opt {
     let mut opts = Options::new();
-    opts.optopt("s", "source", "此Redis内的数据将复制到目的Redis中. URI格式形如: \"redis://[:password@]host:port\", 中括号及其内容可省略", "源Redis的URI");
-    opts.optmulti("t", "target", "URI格式同上", "目的Redis的URI");
-    opts.optflag("", "discard-rdb", "是否跳过整个RDB不进行复制, 默认为false, 复制完整的RDB");
-    opts.optflag("", "aof", "是否需要处理AOF, 默认为false, 当RDB复制完后, 程序将终止");
-    opts.optflag("", "sharding", "是否是shard模式");
-    opts.optflag("", "cluster", "是否是cluster模式");
-    opts.optopt("l", "log", "不指定此选项, 日志将输出至标准输出流", "日志输出文件");
-    opts.optopt("", "read-timeout", "默认0, 永不超时", "读超时时间, 单位毫秒");
-    opts.optopt("", "write-timeout", "默认0, 永不超时", "写超时时间, 单位毫秒");
-    opts.optopt("r", "retry", "默认5次. 最多重试255次", "失败重试次数");
-    opts.optopt("i", "retry-interval", "默认2000. 不可为0", "失败重试间隔时间, 单位毫秒");
+    opts.optopt("s", "source", "此Redis内的数据将复制到目的Redis中", "源Redis的URI, 格式:\"redis://[:password@]host:port\"");
+    opts.optmulti("t", "target", "", "目的Redis的URI, URI格式同上");
+    opts.optflag("d", "discard-rdb", "是否跳过整个RDB不进行复制. 默认为false, 复制完整的RDB");
+    opts.optflag("a", "aof", "是否需要处理AOF. 默认为false, 当RDB复制完后程序将终止");
+    opts.optflag("", "sharding", "是否sharding模式");
+    opts.optflag("", "cluster", "是否cluster模式");
+    opts.optopt("l", "log", "默认输出至stdout", "日志输出文件");
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
     
@@ -221,41 +199,14 @@ fn parse_args(args: Vec<String>) -> Opt {
     let aof = matches.opt_present("aof");
     let log_file = matches.opt_str("l");
     
-    let mut read_timeout = 0;
-    if let Some(str) = matches.opt_str("read-timeout") {
-        read_timeout = str.parse::<u64>().expect("超时时间应为有效的数字");
-    }
-    
-    let mut write_timeout = 0;
-    if let Some(str) = matches.opt_str("write-timeout") {
-        write_timeout = str.parse::<u64>().expect("超时时间应为有效的数字");
-    }
-    
-    let mut retry = 5;
-    if let Some(str) = matches.opt_str("retry") {
-        retry = str.parse::<u8>().expect("重试次数应为有效的数字");
-        if retry == 0 {
-            retry = 1;
-        }
-    }
-    
-    let retry_interval = 2000;
-    if let Some(str) = matches.opt_str("retry-interval") {
-        write_timeout = str.parse::<u64>().expect("重试间隔时间应为有效的数字");
-    }
-    
     return Opt {
         source,
         targets,
         discard_rdb,
         aof,
         log_file,
-        read_timeout,
-        write_timeout,
         sharding,
         cluster,
-        retry,
-        retry_interval,
     };
 }
 
