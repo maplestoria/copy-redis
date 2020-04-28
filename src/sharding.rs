@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, mpsc};
-use std::sync::atomic::AtomicBool;
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
 use log::info;
@@ -111,7 +110,7 @@ impl Drop for ShardedEventHandler {
     }
 }
 
-pub(crate) fn new_sharded(initial_nodes: Vec<String>, running: Arc<AtomicBool>) -> ShardedEventHandler {
+pub(crate) fn new_sharded(initial_nodes: Vec<String>) -> ShardedEventHandler {
     let mut senders: HashMap<String, Sender<Message>> = HashMap::with_capacity(initial_nodes.len());
     let mut workers = Vec::new();
     let mut nodes: BTreeMap<u64, String> = BTreeMap::new();
@@ -129,7 +128,7 @@ pub(crate) fn new_sharded(initial_nodes: Vec<String>, running: Arc<AtomicBool>) 
         }
         let (sender, receiver) = mpsc::channel();
         let worker_name = format!("shard-{}-{}", i, addr);
-        let worker = new_worker(node.clone(), running.clone(), receiver, &worker_name);
+        let worker = new_worker(node.clone(), receiver, &worker_name);
         senders.insert(addr, sender);
         workers.push(Worker { thread: Some(worker) });
     }

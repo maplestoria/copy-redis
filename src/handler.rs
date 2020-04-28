@@ -45,9 +45,9 @@ impl Drop for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: String, running: Arc<AtomicBool>) -> EventHandlerImpl {
+pub(crate) fn new(target: String) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
-    let worker_thread = worker::new_worker(target, running, receiver, "copy_redis::worker");
+    let worker_thread = worker::new_worker(target, receiver, "copy_redis::worker");
     EventHandlerImpl {
         worker: Worker { thread: Option::Some(worker_thread) },
         sender,

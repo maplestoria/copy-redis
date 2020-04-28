@@ -93,14 +93,14 @@ fn run(opt: Opt) {
     if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }
         if opt.sharding {
-            let event_handler = sharding::new_sharded(opt.targets, r2);
+            let event_handler = sharding::new_sharded(opt.targets);
             listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
             let event_handler = handler::new_cluster(opt.targets, r2);
             listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         }
     } else {
-        let event_handler = handler::new(opt.targets.get(0).unwrap().to_string(), r2);
+        let event_handler = handler::new(opt.targets.get(0).unwrap().to_string());
         listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     }
     

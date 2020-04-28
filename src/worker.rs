@@ -1,6 +1,5 @@
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,7 +17,7 @@ pub(crate) enum Message {
     Terminate,
 }
 
-pub(crate) fn new_worker(target: String, _running: Arc<AtomicBool>, receiver: Receiver<Message>, name: &str) -> thread::JoinHandle<()> {
+pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str) -> thread::JoinHandle<()> {
     let builder = thread::Builder::new()
         .name(name.into());
     let worker = builder.spawn(move || {
