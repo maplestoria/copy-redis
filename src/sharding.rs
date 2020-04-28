@@ -32,9 +32,80 @@ impl EventHandler for ShardedEventHandler {
                 match cmd {
                     Command::SELECT(select) => {
                         info!("所有shard切换至db: {}", select.db);
-                        self.select_db(select.db);
+                        let db = select.db.to_string();
+                        self.broadcast("SELECT", Some(&vec![db.as_bytes()]));
                         None
                     }
+                    Command::DEL(del) => {
+                        for key in &del.keys {
+                            let mut cmd = redis::cmd("DEL");
+                            cmd.arg(key.as_slice());
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    Command::MSET(mset) => {
+                        for kv in &mset.key_values {
+                            let mut cmd = redis::cmd("SET");
+                            cmd.arg(kv.key).arg(kv.value);
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    Command::MSETNX(msetnx) => {
+                        for kv in &msetnx.key_values {
+                            let mut cmd = redis::cmd("SETNX");
+                            cmd.arg(kv.key).arg(kv.value);
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    Command::PFCOUNT(pfcount) => {
+                        for key in &pfcount.keys {
+                            let mut cmd = redis::cmd("PFCOUNT");
+                            cmd.arg(*key);
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    Command::UNLINK(unlink) => {
+                        for key in &unlink.keys {
+                            let mut cmd = redis::cmd("UNLINK");
+                            cmd.arg(*key);
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    Command::SCRIPTFLUSH => {
+                        self.broadcast("SCRIPT FLUSH", None);
+                        None
+                    }
+                    Command::SCRIPTLOAD(scriptload) => {
+                        self.broadcast("SCRIPT LOAD", Some(&vec![scriptload.script]));
+                        None
+                    }
+                    Command::SWAPDB(swapdb) => {
+                        self.broadcast("SWAPDB", Some(&vec![swapdb.index1, swapdb.index2]));
+                        None
+                    }
+                    Command::FLUSHDB(flushdb) => {
+                        match flushdb._async {
+                            None => self.broadcast("FLUSHDB", None),
+                            Some(_) => self.broadcast("FLUSHDB", Some(&vec!["ASYNC".as_bytes()])),
+                        };
+                        None
+                    }
+                    Command::FLUSHALL(flushall) => {
+                        match flushall._async {
+                            None => self.broadcast("FLUSHALL", None),
+                            Some(_) => self.broadcast("FLUSHALL", Some(&vec!["ASYNC".as_bytes()])),
+                        };
+                        None
+                    }
+                    Command::BITOP(_) | Command::EVAL(_) | Command::EVALSHA(_) |
+                    Command::MULTI | Command::EXEC | Command::PFMERGE(_) |
+                    Command::SDIFFSTORE(_) | Command::SINTERSTORE(_) | Command::SUNIONSTORE(_) |
+                    Command::ZUNIONSTORE(_) | Command::ZINTERSTORE(_) | Command::PUBLISH(_) => None,
                     _ => self.handle_aof(cmd)
                 }
             }
@@ -53,11 +124,15 @@ impl ShardedEventHandler {
         }
     }
     
-    fn select_db(&self, db: i32) {
+    fn broadcast(&self, cmd: &str, args: Option<&Vec<&[u8]>>) {
         let senders = self.senders.borrow();
         for (_, sender) in senders.iter() {
-            let mut cmd = redis::cmd("SELECT");
-            cmd.arg(db);
+            let mut cmd = redis::cmd(cmd);
+            if let Some(args) = args {
+                for arg in args {
+                    cmd.arg(*arg);
+                }
+            }
             if let Err(err) = sender.send(Message::Cmd(cmd)) {
                 panic!("{}", err)
             }
