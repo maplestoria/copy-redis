@@ -1,5 +1,6 @@
 extern crate ctrlc;
 extern crate getopts;
+extern crate r2d2_redis;
 
 use std::{env, thread};
 use std::cell::RefCell;

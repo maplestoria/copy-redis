@@ -1,10 +1,13 @@
+use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use log::info;
+use log::{error, info};
+use r2d2_redis::{r2d2, RedisConnectionManager};
+use scheduled_thread_pool::ScheduledThreadPool;
 
 pub(crate) struct Worker {
     pub(crate) thread: Option<thread::JoinHandle<()>>
@@ -15,21 +18,19 @@ pub(crate) enum Message {
     Terminate,
 }
 
-pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Receiver<Message>, name: &str) -> thread::JoinHandle<()> {
+pub(crate) fn new_worker(target: String, _running: Arc<AtomicBool>, receiver: Receiver<Message>, name: &str) -> thread::JoinHandle<()> {
     let builder = thread::Builder::new()
         .name(name.into());
     let worker = builder.spawn(move || {
         let handle = thread::current();
         let t_name = handle.name().unwrap();
         info!(target: t_name, "Worker thread started");
-        let client = redis::Client::open(target).unwrap();
-        let mut conn = match client.get_connection() {
-            Ok(conn) => conn,
-            Err(err) => {
-                running.store(false, Ordering::SeqCst);
-                panic!("{}", err)
-            }
-        };
+        let manager = RedisConnectionManager::new(target).unwrap();
+        let pool = r2d2::Pool::builder()
+            .max_size(1)
+            .thread_pool(Arc::new(ScheduledThreadPool::with_name("r2d2-worker-{}", 1)))
+            .build(manager)
+            .unwrap();
         let mut pipeline = redis::pipe();
         let mut count = 0;
         let mut timer = Instant::now();
@@ -48,9 +49,10 @@ pub(crate) fn new_worker(target: String, running: Arc<AtomicBool>, receiver: Rec
             }
             let elapsed = timer.elapsed();
             if (elapsed.ge(&hundred_millis) || shutdown) && count > 0 {
-                match pipeline.query(&mut conn) {
+                let mut conn = pool.get().unwrap();
+                match pipeline.query(conn.deref_mut()) {
                     Err(err) => {
-                        panic!("数据写入失败: {}", err);
+                        error!(target: t_name, "数据写入失败: {}", err);
                     }
                     Ok(()) => {
                         info!(target: t_name, "写入成功: {}", count);
