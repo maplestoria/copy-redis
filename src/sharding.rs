@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
@@ -19,7 +19,7 @@ const SEED: u64 = 0x1234ABCD;
 pub struct ShardedEventHandler {
     workers: Vec<Worker>,
     nodes: BTreeMap<u64, String>,
-    senders: RefCell<HashMap<String, Sender<Message>>>,
+    senders: RefCell<BTreeMap<String, Sender<Message>>>,
 }
 
 impl EventHandler for ShardedEventHandler {
@@ -151,17 +151,16 @@ impl ShardedEventHandler {
                 }
             };
             let senders = self.senders.borrow();
-            let first_sender = senders.values().next();
             match self.get_shard(key) {
                 None => {
+                    let first_sender = senders.values().next();
                     let sender = first_sender.unwrap();
                     if let Err(err) = sender.send(Message::Cmd(cmd)) {
                         panic!("{}", err)
                     }
                 }
                 Some(node) => {
-                    let sender = senders.get(&node);
-                    let sender = sender.unwrap();
+                    let sender = senders.get(&node).unwrap();
                     if let Err(err) = sender.send(Message::Cmd(cmd)) {
                         panic!("{}", err)
                     }
@@ -186,7 +185,7 @@ impl Drop for ShardedEventHandler {
 }
 
 pub(crate) fn new_sharded(initial_nodes: Vec<String>) -> ShardedEventHandler {
-    let mut senders: HashMap<String, Sender<Message>> = HashMap::with_capacity(initial_nodes.len());
+    let mut senders: BTreeMap<String, Sender<Message>> = BTreeMap::new();
     let mut workers = Vec::new();
     let mut nodes: BTreeMap<u64, String> = BTreeMap::new();
     
