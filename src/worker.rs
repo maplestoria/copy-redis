@@ -48,18 +48,24 @@ pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str
             }
             let elapsed = timer.elapsed();
             if (elapsed.ge(&hundred_millis) || shutdown) && count > 0 {
-                let mut conn = pool.get().unwrap();
-                match pipeline.query(conn.deref_mut()) {
+                match pool.get() {
+                    Ok(mut conn) => {
+                        match pipeline.query(conn.deref_mut()) {
+                            Err(err) => {
+                                error!(target: t_name, "数据写入失败: {}", err);
+                            }
+                            Ok(()) => {
+                                info!(target: t_name, "写入成功: {}", count);
+                            }
+                        };
+                        timer = Instant::now();
+                        pipeline.clear();
+                        count = 0;
+                    }
                     Err(err) => {
-                        error!(target: t_name, "数据写入失败: {}", err);
+                        error!(target: t_name, "{}", err);
                     }
-                    Ok(()) => {
-                        info!(target: t_name, "写入成功: {}", count);
-                    }
-                };
-                timer = Instant::now();
-                pipeline.clear();
-                count = 0;
+                }
             }
             if shutdown {
                 break;

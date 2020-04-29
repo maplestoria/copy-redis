@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
-use log::info;
 use murmurhash64::murmur_hash64a;
 use redis::{Arg, Cmd, ConnectionAddr, IntoConnectionInfo};
 use redis_event::{Event, EventHandler};
@@ -31,7 +30,6 @@ impl EventHandler for ShardedEventHandler {
             AOF(cmd) => {
                 match cmd {
                     Command::SELECT(select) => {
-                        info!("所有shard切换至db: {}", select.db);
                         let db = select.db.to_string();
                         self.broadcast("SELECT", Some(&vec![db.as_bytes()]));
                         None
@@ -192,7 +190,7 @@ pub(crate) fn new_sharded(initial_nodes: Vec<String>) -> ShardedEventHandler {
     for (i, node) in initial_nodes.into_iter().enumerate() {
         let info = node.as_str().into_connection_info().unwrap();
         let addr = match *info.addr {
-            ConnectionAddr::Tcp(ref host, port) => format!("{}:{}", host, port),
+            ConnectionAddr::Tcp(ref host, port) => format!("{}-{}:{}", i, host, port),
             _ => panic!("No reach."),
         };
         for n in 0..160 {
@@ -201,7 +199,7 @@ pub(crate) fn new_sharded(initial_nodes: Vec<String>) -> ShardedEventHandler {
             nodes.insert(hash, addr.clone());
         }
         let (sender, receiver) = mpsc::channel();
-        let worker_name = format!("shard-{}-{}", i, addr);
+        let worker_name = format!("shard-{}", addr);
         let worker = new_worker(node.clone(), receiver, &worker_name);
         senders.insert(addr, sender);
         workers.push(Worker { thread: Some(worker) });

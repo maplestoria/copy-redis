@@ -157,7 +157,7 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 fn parse_args(args: Vec<String>) -> Opt {
     let mut opts = Options::new();
-    opts.optopt("s", "source", "此Redis内的数据将复制到目的Redis中", "源Redis的URI, 格式:\"redis://[:password@]host:port\"");
+    opts.optopt("s", "source", "此Redis内的数据将复制到目的Redis中", "源Redis的URI, 格式:\"redis://[:password@]host:port[/db]\"");
     opts.optmulti("t", "target", "", "目的Redis的URI, URI格式同上");
     opts.optflag("d", "discard-rdb", "是否跳过整个RDB不进行复制. 默认为false, 复制完整的RDB");
     opts.optflag("a", "aof", "是否需要处理AOF. 默认为false, 当RDB复制完后程序将终止");
