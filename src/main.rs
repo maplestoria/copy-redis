@@ -162,7 +162,7 @@ fn parse_args(args: Vec<String>) -> Opt {
     opts.optflag("d", "discard-rdb", "是否跳过整个RDB不进行复制. 默认为false, 复制完整的RDB");
     opts.optflag("a", "aof", "是否需要处理AOF. 默认为false, 当RDB复制完后程序将终止");
     opts.optflag("", "sharding", "是否sharding模式");
-    opts.optflag("", "cluster", "是否cluster模式");
+    // opts.optflag("", "cluster", "是否cluster模式");
     opts.optopt("l", "log", "默认输出至stdout", "日志输出文件");
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
