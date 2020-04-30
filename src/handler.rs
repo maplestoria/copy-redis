@@ -40,9 +40,9 @@ impl Drop for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: String) -> EventHandlerImpl {
+pub(crate) fn new(target: String, batch_size: i32) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
-    let worker_thread = worker::new_worker(target, receiver, "copy_redis::worker");
+    let worker_thread = worker::new_worker(target, receiver, "copy_redis::worker", batch_size);
     EventHandlerImpl {
         worker: Worker { thread: Option::Some(worker_thread) },
         sender,

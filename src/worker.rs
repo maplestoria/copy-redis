@@ -17,7 +17,7 @@ pub(crate) enum Message {
     Terminate,
 }
 
-pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str) -> thread::JoinHandle<()> {
+pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str, batch_size: i32) -> thread::JoinHandle<()> {
     let builder = thread::Builder::new()
         .name(name.into());
     let worker = builder.spawn(move || {
@@ -36,15 +36,17 @@ pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str
         let hundred_millis = Duration::from_millis(100);
         let mut shutdown = false;
         loop {
-            match receiver.recv_timeout(Duration::from_millis(10)) {
-                Ok(Message::Cmd(cmd)) => {
-                    pipeline.add_command(cmd);
-                    count += 1;
+            if (batch_size < 0) || (count < batch_size) {
+                match receiver.recv_timeout(Duration::from_millis(10)) {
+                    Ok(Message::Cmd(cmd)) => {
+                        pipeline.add_command(cmd);
+                        count += 1;
+                    }
+                    Ok(Message::Terminate) => {
+                        shutdown = true;
+                    }
+                    Err(_) => {}
                 }
-                Ok(Message::Terminate) => {
-                    shutdown = true;
-                }
-                Err(_) => {}
             }
             let elapsed = timer.elapsed();
             if (elapsed.ge(&hundred_millis) || shutdown) && count > 0 {

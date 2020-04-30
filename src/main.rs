@@ -82,14 +82,14 @@ fn run(opt: Opt) {
     if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }
         if opt.sharding {
-            let event_handler = sharding::new_sharded(opt.targets);
+            let event_handler = sharding::new_sharded(opt.targets, opt.batch_size);
             listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
             let event_handler = cluster::new_cluster(opt.targets, r2);
             listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         }
     } else {
-        let event_handler = handler::new(opt.targets.get(0).unwrap().to_string());
+        let event_handler = handler::new(opt.targets.get(0).unwrap().to_string(), opt.batch_size);
         listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     }
     
@@ -151,6 +151,7 @@ struct Opt {
     log_file: Option<String>,
     sharding: bool,
     cluster: bool,
+    batch_size: i32,
 }
 
 const METADATA: &'static str = ".copy-redis";
@@ -165,6 +166,7 @@ fn parse_args(args: Vec<String>) -> Opt {
     opts.optflag("", "sharding", "是否sharding模式");
     opts.optflag("", "cluster", "是否cluster模式");
     opts.optopt("l", "log", "默认输出至stdout", "日志输出文件");
+    opts.optopt("p", "batch-size", "发送至Redis的每一批命令的最大数量, 若<=0则不限制数量", "2000");
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
     
@@ -200,6 +202,17 @@ fn parse_args(args: Vec<String>) -> Opt {
     let aof = matches.opt_present("aof");
     let log_file = matches.opt_str("l");
     
+    let batch_size = if matches.opt_present("p") {
+        let _str = matches.opt_str("p").unwrap();
+        let size = match _str.parse::<i32>() {
+            Ok(size) => if size > 0 { size } else { -1 },
+            Err(_) => 2000,
+        };
+        size
+    } else {
+        2000
+    };
+    
     return Opt {
         source,
         targets,
@@ -208,6 +221,7 @@ fn parse_args(args: Vec<String>) -> Opt {
         log_file,
         sharding,
         cluster,
+        batch_size,
     };
 }
 
