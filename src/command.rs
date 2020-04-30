@@ -679,6 +679,13 @@ pub trait CommandConverter {
                 }
                 return Some(cmd);
             }
+            Command::Other(raw_cmd) => {
+                let mut cmd = redis::cmd(&raw_cmd.name);
+                for arg in raw_cmd.args {
+                    cmd.arg(arg);
+                }
+                return Some(cmd);
+            }
         }
     }
 }
