@@ -63,4 +63,28 @@ $ copy-redis -s redis://127.0.0.1:6379 \
 
 ### Cluster模式
 
-待完善
+Cluster模式的使用与Sharding模式类似, 指定一个或多个Redis Cluster的节点地址, 并指定`--cluster`参数即可:
+
+```bash
+$ copy-redis -s redis://127.0.0.1:6379 -t redis://127.0.0.1:6479 --cluster
+```
+
+> Note: Cluster模式暂不支持pipeline, 所以写入效率较低
+
+### 限制
+
+Module, Stream, 以及Redis 6均不支持.
+
+以下命令/功能在Sharding/Cluster模式下不支持:
+
+- BITOP
+- EVAL
+- EVALSHA
+- MULTI & EXEC
+- PFMERGE
+- SDIFFSTORE
+- SINTERSTORE
+- SUNIONSTORE
+- ZUNIONSTORE
+- ZINTERSTORE
+- Pub/Sub
