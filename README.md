@@ -16,8 +16,13 @@ Options:
     -d, --discard-rdb   是否跳过整个RDB不进行复制. 默认为false, 复制完整的RDB
     -a, --aof           是否需要处理AOF. 默认为false, 当RDB复制完后程序将终止
         --sharding      是否sharding模式
+        --cluster       是否cluster模式
     -l, --log 日志输出文件
                         默认输出至stdout
+    -p, --batch-size 2500
+                        发送至Redis的每一批命令的最大数量, 若<=0则不限制数量
+    -i, --flush-interval 100
+                        发送命令的最短间隔时间(毫秒)
     -h, --help          输出帮助信息
     -v, --version
 ```
