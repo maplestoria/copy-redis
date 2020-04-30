@@ -17,7 +17,7 @@ pub(crate) enum Message {
     Terminate,
 }
 
-pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str, batch_size: i32) -> thread::JoinHandle<()> {
+pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str, batch_size: i32, flush_interval: u64) -> thread::JoinHandle<()> {
     let builder = thread::Builder::new()
         .name(name.into());
     let worker = builder.spawn(move || {
@@ -33,7 +33,7 @@ pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str
         let mut pipeline = redis::pipe();
         let mut count = 0;
         let mut timer = Instant::now();
-        let hundred_millis = Duration::from_millis(100);
+        let interval = Duration::from_millis(flush_interval);
         let mut shutdown = false;
         loop {
             if (batch_size < 0) || (count < batch_size) {
@@ -49,7 +49,7 @@ pub(crate) fn new_worker(target: String, receiver: Receiver<Message>, name: &str
                 }
             }
             let elapsed = timer.elapsed();
-            if (elapsed.ge(&hundred_millis) || shutdown) && count > 0 {
+            if (elapsed.ge(&interval) || shutdown) && count > 0 {
                 match pool.get() {
                     Ok(mut conn) => {
                         match pipeline.query(conn.deref_mut()) {

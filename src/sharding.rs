@@ -182,7 +182,7 @@ impl Drop for ShardedEventHandler {
     }
 }
 
-pub(crate) fn new_sharded(initial_nodes: Vec<String>, batch_size: i32) -> ShardedEventHandler {
+pub(crate) fn new_sharded(initial_nodes: Vec<String>, batch_size: i32, flush_interval: u64) -> ShardedEventHandler {
     let mut senders: BTreeMap<String, Sender<Message>> = BTreeMap::new();
     let mut workers = Vec::new();
     let mut nodes: BTreeMap<u64, String> = BTreeMap::new();
@@ -200,7 +200,7 @@ pub(crate) fn new_sharded(initial_nodes: Vec<String>, batch_size: i32) -> Sharde
         }
         let (sender, receiver) = mpsc::channel();
         let worker_name = format!("shard-{}", addr);
-        let worker = new_worker(node.clone(), receiver, &worker_name, batch_size);
+        let worker = new_worker(node.clone(), receiver, &worker_name, batch_size, flush_interval);
         senders.insert(addr, sender);
         workers.push(Worker { thread: Some(worker) });
     }
