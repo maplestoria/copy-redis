@@ -36,7 +36,7 @@ impl EventHandler for ShardedEventHandler {
                             for (field, value) in entry.fields {
                                 cmd.arg(field).arg(value);
                             }
-                            self.execute(Some(cmd));
+                            self.execute(Some(cmd), Some(key.as_slice()));
                         }
                         None
                     }
@@ -54,7 +54,7 @@ impl EventHandler for ShardedEventHandler {
                         for key in &del.keys {
                             let mut cmd = redis::cmd("DEL");
                             cmd.arg(key.as_slice());
-                            self.execute(Some(cmd));
+                            self.execute(Some(cmd), Some(key.as_slice()));
                         }
                         None
                     }
@@ -62,7 +62,7 @@ impl EventHandler for ShardedEventHandler {
                         for kv in &mset.key_values {
                             let mut cmd = redis::cmd("SET");
                             cmd.arg(kv.key).arg(kv.value);
-                            self.execute(Some(cmd));
+                            self.execute(Some(cmd), Some(kv.key));
                         }
                         None
                     }
@@ -70,7 +70,7 @@ impl EventHandler for ShardedEventHandler {
                         for kv in &msetnx.key_values {
                             let mut cmd = redis::cmd("SETNX");
                             cmd.arg(kv.key).arg(kv.value);
-                            self.execute(Some(cmd));
+                            self.execute(Some(cmd), Some(kv.key));
                         }
                         None
                     }
@@ -78,7 +78,7 @@ impl EventHandler for ShardedEventHandler {
                         for key in &pfcount.keys {
                             let mut cmd = redis::cmd("PFCOUNT");
                             cmd.arg(*key);
-                            self.execute(Some(cmd));
+                            self.execute(Some(cmd), Some(*key));
                         }
                         None
                     }
@@ -86,7 +86,7 @@ impl EventHandler for ShardedEventHandler {
                         for key in &unlink.keys {
                             let mut cmd = redis::cmd("UNLINK");
                             cmd.arg(*key);
-                            self.execute(Some(cmd));
+                            self.execute(Some(cmd), Some(*key));
                         }
                         None
                     }
@@ -116,6 +116,29 @@ impl EventHandler for ShardedEventHandler {
                         };
                         None
                     }
+                    Command::XGROUP(xgroup) => {
+                        if let Some(create) = &xgroup.create {
+                            let mut cmd = redis::cmd("XGROUP");
+                            cmd.arg("CREATE").arg(create.key).arg(create.group_name).arg(create.id);
+                            self.execute(Some(cmd), Some(create.key));
+                        }
+                        if let Some(set_id) = &xgroup.set_id {
+                            let mut cmd = redis::cmd("XGROUP");
+                            cmd.arg("SETID").arg(set_id.key).arg(set_id.group_name).arg(set_id.id);
+                            self.execute(Some(cmd), Some(set_id.key));
+                        }
+                        if let Some(destroy) = &xgroup.destroy {
+                            let mut cmd = redis::cmd("XGROUP");
+                            cmd.arg("DESTROY").arg(destroy.key).arg(destroy.group_name);
+                            self.execute(Some(cmd), Some(destroy.key));
+                        }
+                        if let Some(del_consumer) = &xgroup.del_consumer {
+                            let mut cmd = redis::cmd("XGROUP");
+                            cmd.arg("DELCONSUMER").arg(del_consumer.key).arg(del_consumer.group_name).arg(del_consumer.consumer_name);
+                            self.execute(Some(cmd), Some(del_consumer.key));
+                        }
+                        None
+                    }
                     Command::BITOP(_) | Command::EVAL(_) | Command::EVALSHA(_) |
                     Command::MULTI | Command::EXEC | Command::PFMERGE(_) |
                     Command::SDIFFSTORE(_) | Command::SINTERSTORE(_) | Command::SUNIONSTORE(_) |
@@ -124,7 +147,7 @@ impl EventHandler for ShardedEventHandler {
                 }
             }
         };
-        self.execute(cmd);
+        self.execute(cmd, None);
     }
 }
 
@@ -153,19 +176,24 @@ impl ShardedEventHandler {
         }
     }
     
-    fn execute(&self, cmd: Option<Cmd>) {
+    fn execute(&self, cmd: Option<Cmd>, key: Option<&[u8]>) {
         if let Some(cmd) = cmd {
-            let key = match cmd.args_iter().skip(1).next() {
-                None => panic!("cmd args is empty"),
-                Some(arg) => {
-                    match arg {
-                        Arg::Simple(arg) => arg,
-                        Arg::Cursor => panic!("cmd first arg is cursor")
+            let _key;
+            if let Some(the_key) = key {
+                _key = the_key;
+            } else {
+                _key = match cmd.args_iter().skip(1).next() {
+                    None => panic!("cmd args is empty"),
+                    Some(arg) => {
+                        match arg {
+                            Arg::Simple(arg) => arg,
+                            Arg::Cursor => panic!("cmd first arg is cursor")
+                        }
                     }
-                }
-            };
+                };
+            }
             let senders = self.senders.borrow();
-            match self.get_shard(key) {
+            match self.get_shard(&_key) {
                 None => {
                     let first_sender = senders.values().next();
                     let sender = first_sender.unwrap();

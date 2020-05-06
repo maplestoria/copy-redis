@@ -686,6 +686,70 @@ pub trait CommandConverter {
                 }
                 return Some(cmd);
             }
+            Command::XACK(xack) => {
+                let mut cmd = redis::cmd("XACK");
+                cmd.arg(xack.key).arg(xack.group);
+                for id in &xack.ids {
+                    cmd.arg(id.to_vec());
+                }
+                return Some(cmd);
+            }
+            Command::XADD(xadd) => {
+                let mut cmd = redis::cmd("XADD");
+                cmd.arg(xadd.key).arg(xadd.id);
+                for field in &xadd.fields {
+                    cmd.arg(field.name).arg(field.value);
+                }
+                return Some(cmd);
+            }
+            Command::XCLAIM(xclaim) => {
+                let mut cmd = redis::cmd("XCLAIM");
+                cmd.arg(xclaim.key).arg(xclaim.group).arg(xclaim.consumer)
+                    .arg(xclaim.min_idle_time);
+                for id in &xclaim.ids {
+                    cmd.arg(id.to_vec());
+                }
+                if let Some(idle) = xclaim.idle {
+                    cmd.arg("IDLE").arg(idle.to_vec());
+                }
+                if let Some(time) = xclaim.time {
+                    cmd.arg("TIME").arg(time.to_vec());
+                }
+                if let Some(retry_count) = xclaim.retry_count {
+                    cmd.arg("RETRYCOUNT").arg(retry_count.to_vec());
+                }
+                if let Some(_) = xclaim.force {
+                    cmd.arg("FORCE");
+                }
+                if let Some(_) = xclaim.just_id {
+                    cmd.arg("JUSTID");
+                }
+                Some(cmd)
+            }
+            Command::XDEL(xdel) => {
+                let mut cmd = redis::cmd("XDEL");
+                cmd.arg(xdel.key);
+                for id in &xdel.ids {
+                    cmd.arg(id.to_vec());
+                }
+                Some(cmd)
+            }
+            Command::XGROUP(xgroup) => {
+                let mut cmd = redis::cmd("XGROUP");
+                if let Some(create) = &xgroup.create {
+                    cmd.arg("CREATE").arg(create.key).arg(create.group_name).arg(create.id);
+                }
+                if let Some(set_id) = &xgroup.set_id {
+                    cmd.arg("SETID").arg(set_id.key).arg(set_id.group_name).arg(set_id.id);
+                }
+                if let Some(destroy) = &xgroup.destroy {
+                    cmd.arg("DESTROY").arg(destroy.key).arg(destroy.group_name);
+                }
+                if let Some(del_consumer) = &xgroup.del_consumer {
+                    cmd.arg("DELCONSUMER").arg(del_consumer.key).arg(del_consumer.group_name).arg(del_consumer.consumer_name);
+                }
+                Some(cmd)
+            }
         }
     }
 }
