@@ -30,7 +30,7 @@ impl EventHandler for ShardedEventHandler {
                     Object::Stream(key, stream) => {
                         for (id, entry) in stream.entries {
                             let mut cmd = redis::cmd("XADD");
-                            cmd.arg(key.clone());
+                            cmd.arg(key.as_slice());
                             let id = format!("{}-{}", id.ms, id.seq);
                             cmd.arg(id);
                             for (field, value) in entry.fields {

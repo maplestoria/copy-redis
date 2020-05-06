@@ -690,7 +690,7 @@ pub trait CommandConverter {
                 let mut cmd = redis::cmd("XACK");
                 cmd.arg(xack.key).arg(xack.group);
                 for id in &xack.ids {
-                    cmd.arg(id.to_vec());
+                    cmd.arg(id.as_slice());
                 }
                 return Some(cmd);
             }
@@ -707,16 +707,16 @@ pub trait CommandConverter {
                 cmd.arg(xclaim.key).arg(xclaim.group).arg(xclaim.consumer)
                     .arg(xclaim.min_idle_time);
                 for id in &xclaim.ids {
-                    cmd.arg(id.to_vec());
+                    cmd.arg(id.as_slice());
                 }
                 if let Some(idle) = xclaim.idle {
-                    cmd.arg("IDLE").arg(idle.to_vec());
+                    cmd.arg("IDLE").arg(idle.as_slice());
                 }
                 if let Some(time) = xclaim.time {
-                    cmd.arg("TIME").arg(time.to_vec());
+                    cmd.arg("TIME").arg(time.as_slice());
                 }
                 if let Some(retry_count) = xclaim.retry_count {
-                    cmd.arg("RETRYCOUNT").arg(retry_count.to_vec());
+                    cmd.arg("RETRYCOUNT").arg(retry_count.as_slice());
                 }
                 if let Some(_) = xclaim.force {
                     cmd.arg("FORCE");
@@ -730,7 +730,7 @@ pub trait CommandConverter {
                 let mut cmd = redis::cmd("XDEL");
                 cmd.arg(xdel.key);
                 for id in &xdel.ids {
-                    cmd.arg(id.to_vec());
+                    cmd.arg(id.as_slice());
                 }
                 Some(cmd)
             }
