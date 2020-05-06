@@ -8,6 +8,7 @@ use redis::{Arg, Cmd, ConnectionAddr, IntoConnectionInfo};
 use redis_event::{Event, EventHandler};
 use redis_event::cmd::Command;
 use redis_event::Event::{AOF, RDB};
+use redis_event::rdb::Object;
 
 use crate::command::CommandConverter;
 use crate::worker::{Message, Worker};
@@ -25,7 +26,22 @@ impl EventHandler for ShardedEventHandler {
     fn handle(&mut self, event: Event) {
         let cmd = match event {
             RDB(rdb) => {
-                self.handle_rdb(rdb)
+                match rdb {
+                    Object::Stream(key, stream) => {
+                        for (id, entry) in stream.entries {
+                            let mut cmd = redis::cmd("XADD");
+                            cmd.arg(key.clone());
+                            let id = format!("{}-{}", id.ms, id.seq);
+                            cmd.arg(id);
+                            for (field, value) in entry.fields {
+                                cmd.arg(field).arg(value);
+                            }
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    _ => self.handle_rdb(rdb)
+                }
             }
             AOF(cmd) => {
                 match cmd {

@@ -12,6 +12,7 @@ use redis_event::cmd::Command;
 
 use crate::command::CommandConverter;
 use crate::worker::{Message, Worker};
+use redis_event::rdb::Object;
 
 pub(crate) struct ClusterEventHandlerImpl {
     worker: Worker,
@@ -21,7 +22,24 @@ pub(crate) struct ClusterEventHandlerImpl {
 impl EventHandler for ClusterEventHandlerImpl {
     fn handle(&mut self, event: Event) {
         let cmd = match event {
-            Event::RDB(rdb) => self.handle_rdb(rdb),
+            Event::RDB(rdb) => {
+                match rdb {
+                    Object::Stream(key, stream) => {
+                        for (id, entry) in stream.entries {
+                            let mut cmd = redis::cmd("XADD");
+                            cmd.arg(key.clone());
+                            let id = format!("{}-{}", id.ms, id.seq);
+                            cmd.arg(id);
+                            for (field, value) in entry.fields {
+                                cmd.arg(field).arg(value);
+                            }
+                            self.execute(Some(cmd));
+                        }
+                        None
+                    }
+                    _ => self.handle_rdb(rdb)
+                }
+            },
             Event::AOF(aof) => {
                 match aof {
                     Command::DEL(del) => {

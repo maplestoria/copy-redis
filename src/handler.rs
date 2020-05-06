@@ -3,6 +3,7 @@ use std::sync::mpsc::Sender;
 
 use redis_event::{Event, EventHandler};
 use redis_event::Event::{AOF, RDB};
+use redis_event::rdb::Object;
 
 use crate::command::CommandConverter;
 use crate::worker;
@@ -17,7 +18,24 @@ impl EventHandler for EventHandlerImpl {
     fn handle(&mut self, event: Event) {
         let cmd = match event {
             RDB(rdb) => {
-                self.handle_rdb(rdb)
+                match rdb {
+                    Object::Stream(key, stream) => {
+                        for (id, entry) in stream.entries {
+                            let mut cmd = redis::cmd("XADD");
+                            cmd.arg(key.clone());
+                            let id = format!("{}-{}", id.ms, id.seq);
+                            cmd.arg(id);
+                            for (field, value) in entry.fields {
+                                cmd.arg(field).arg(value);
+                            }
+                            if let Err(err) = self.sender.send(Message::Cmd(cmd)) {
+                                panic!("{}", err)
+                            }
+                        }
+                        None
+                    }
+                    _ => self.handle_rdb(rdb)
+                }
             }
             AOF(cmd) => {
                 self.handle_aof(cmd)
