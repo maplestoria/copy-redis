@@ -72,6 +72,7 @@ fn run(opt: Opt) {
     let listener_running = Arc::new(AtomicBool::new(true));
     let r1 = listener_running.clone();
     let r2 = listener_running.clone();
+    let is_running = listener_running.clone();
     ctrlc::set_handler(move || {
         info!("接收到Ctrl-C信号, 等待程序退出...");
         r1.store(false, Ordering::SeqCst);
@@ -93,7 +94,7 @@ fn run(opt: Opt) {
         listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
     }
     
-    loop {
+    while is_running.load(Ordering::Relaxed) {
         if let Err(error) = listener.start() {
             error!("连接到源Redis错误: {}", error.to_string());
             thread::sleep(Duration::from_millis(2000));
