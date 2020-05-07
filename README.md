@@ -78,7 +78,7 @@ $ copy-redis -s redis://127.0.0.1:6379 -t redis://127.0.0.1:6479 --cluster
 
 ### 限制
 
-Module, Stream, 以及Redis 6均不支持.
+暂不支持Redis 6.
 
 以下命令/功能在Sharding/Cluster模式下不支持:
 
