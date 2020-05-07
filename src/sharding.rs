@@ -31,11 +31,16 @@ impl EventHandler for ShardedEventHandler {
                         for (id, entry) in stream.entries {
                             let mut cmd = redis::cmd("XADD");
                             cmd.arg(key.as_slice());
-                            let id = format!("{}-{}", id.ms, id.seq);
-                            cmd.arg(id);
+                            cmd.arg(id.to_string());
                             for (field, value) in entry.fields {
                                 cmd.arg(field).arg(value);
                             }
+                            self.execute(Some(cmd), Some(key.as_slice()));
+                        }
+                        for group in stream.groups {
+                            let mut cmd = redis::cmd("XGROUP");
+                            cmd.arg("CREATE").arg(key.as_slice())
+                                .arg(group.name).arg(group.last_id.to_string());
                             self.execute(Some(cmd), Some(key.as_slice()));
                         }
                         None
