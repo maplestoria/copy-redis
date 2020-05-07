@@ -21,7 +21,7 @@ use std::time::Duration;
 use getopts::Options;
 use log::{error, info};
 use redis::{ConnectionAddr, IntoConnectionInfo};
-use redis_event::listener::standalone;
+use redis_event::listener;
 use redis_event::RedisListener;
 
 mod handler;
@@ -78,7 +78,7 @@ fn run(opt: Opt) {
         r1.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
     
-    let mut listener = standalone::new(config, listener_running);
+    let mut listener = listener::new(config, listener_running);
     
     if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }

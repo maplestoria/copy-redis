@@ -750,6 +750,15 @@ pub trait CommandConverter {
                 }
                 Some(cmd)
             }
+            Command::XTRIM(xtrim) => {
+                let mut cmd = redis::cmd("XTRIM");
+                cmd.arg(xtrim.key).arg("MAXLEN");
+                if xtrim.approximation {
+                    cmd.arg("~");
+                }
+                cmd.arg(xtrim.count);
+                Some(cmd)
+            }
         }
     }
 }
