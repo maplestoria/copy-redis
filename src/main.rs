@@ -10,7 +10,7 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Error, Read, Write};
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
@@ -21,6 +21,7 @@ use std::time::Duration;
 use getopts::Options;
 use log::{error, info};
 use redis::{ConnectionAddr, IntoConnectionInfo};
+use redis_event::config::Config;
 use redis_event::listener;
 use redis_event::RedisListener;
 
@@ -29,6 +30,7 @@ mod sharding;
 mod command;
 mod worker;
 mod cluster;
+mod tests;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,47 +40,16 @@ fn main() {
 }
 
 fn run(opt: Opt) {
-    let source = opt.source.into_connection_info().expect("源Redis URI无效");
-    let socket_addr;
-    if let ConnectionAddr::Tcp(host, port) = source.addr.as_ref() {
-        let addr = format!("{}:{}", host, port);
-        let mut iter = addr.to_socket_addrs().expect("");
-        socket_addr = iter.next().unwrap();
-    } else {
-        unimplemented!("Unix Domain Socket");
-    }
+    let (socket_addr, source_passwd) = get_source_addr_passwd(&opt);
     let source_addr = socket_addr.to_string();
-    
-    let mut config = redis_event::config::Config {
-        is_discard_rdb: opt.discard_rdb,
-        is_aof: opt.aof,
-        addr: socket_addr,
-        password: source.passwd.unwrap_or_default(),
-        repl_id: "?".to_string(),
-        repl_offset: -1,
-        read_timeout: None,
-        write_timeout: None,
-    };
-    
-    if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
-        info!("获取到PSYNC记录信息, id: {}, offset: {}", repl_id, repl_offset);
-        config.repl_id = repl_id;
-        config.repl_offset = repl_offset;
-    }
-    
+    let config = new_redis_listener_config(opt.discard_rdb, opt.aof, socket_addr, source_passwd, &source_addr);
     // 先关闭listener，因为listener在读取流中的数据时，是阻塞的，
     // 所以在接收到ctrl-c信号的时候，得再等一会，等redis master的数据来到(或者读取超时)，此时，程序才会继续运行，
     // 等命令被handler处理完之后，listener才能结束，而且handler的结束还必须在listener之后，要不然丢数据
-    let listener_running = Arc::new(AtomicBool::new(true));
-    let r1 = listener_running.clone();
-    let r2 = listener_running.clone();
-    let is_running = listener_running.clone();
-    ctrlc::set_handler(move || {
-        info!("接收到Ctrl-C信号, 等待程序退出...");
-        r1.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
+    let is_running = Arc::new(AtomicBool::new(true));
+    setup_ctrlc_handler(is_running.clone());
     
-    let mut listener = listener::new(config, listener_running);
+    let mut listener = listener::new(config, is_running.clone());
     
     if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster { panic!("不能同时指定sharding与cluster") }
@@ -86,7 +57,7 @@ fn run(opt: Opt) {
             let event_handler = sharding::new_sharded(opt.targets, opt.batch_size, opt.flush_interval);
             listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
-            let event_handler = cluster::new_cluster(opt.targets, r2);
+            let event_handler = cluster::new_cluster(opt.targets, is_running.clone());
             listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
         }
     } else {
@@ -106,6 +77,57 @@ fn run(opt: Opt) {
     // 程序正常退出时，保存repl id和offset
     if let Err(err) = save_repl_meta(&source_addr, &listener.config.repl_id, listener.config.repl_offset) {
         error!("保存PSYNC信息失败:{}", err);
+    }
+}
+
+fn new_redis_listener_config(is_discard_rdb: bool, is_aof: bool,
+                             socket_addr: SocketAddr, source_passwd: Option<String>,
+                             source_addr: &String) -> Config {
+    let mut config = redis_event::config::Config {
+        is_discard_rdb,
+        is_aof,
+        addr: socket_addr,
+        password: source_passwd.unwrap_or_default(),
+        repl_id: "?".to_string(),
+        repl_offset: -1,
+        read_timeout: None,
+        write_timeout: None,
+    };
+    if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
+        info!("获取到PSYNC记录信息, id: {}, offset: {}", repl_id, repl_offset);
+        config.repl_id = repl_id;
+        config.repl_offset = repl_offset;
+    }
+    config
+}
+
+fn get_source_addr_passwd(opt: &Opt) -> (SocketAddr, Option<String>) {
+    let source = opt.source.as_str().into_connection_info().expect("源Redis URI无效");
+    let socket_addr;
+    if let ConnectionAddr::Tcp(host, port) = source.addr.as_ref() {
+        let addr = format!("{}:{}", host, port);
+        let mut iter = addr.to_socket_addrs().expect("");
+        socket_addr = iter.next().unwrap();
+    } else {
+        unimplemented!("Unix Domain Socket");
+    }
+    (socket_addr, source.passwd)
+}
+
+fn setup_ctrlc_handler(r1: Arc<AtomicBool>) {
+    match ctrlc::set_handler(move || {
+        info!("接收到Ctrl-C信号, 等待程序退出...");
+        r1.store(false, Ordering::SeqCst);
+    }) {
+        Ok(_) => {}
+        Err(err) => {
+            match err {
+                ctrlc::Error::MultipleHandlers => {}
+                _ => {
+                    panic!("Error setting Ctrl-C handler")
+                }
+            }
+        }
     }
 }
 
