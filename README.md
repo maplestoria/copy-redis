@@ -74,22 +74,25 @@ Cluster模式的使用与Sharding模式类似, 指定一个或多个Redis Cluste
 $ copy-redis -s redis://127.0.0.1:6379 -t redis://127.0.0.1:6479 --cluster
 ```
 
-> Note: Cluster模式暂不支持pipeline, 所以写入效率较低
+### Note
 
-### 限制
+- 只有Cluster模式目前不支持pipeline, 所以写入效率较低
 
-暂不支持Redis 6.
+- 暂不支持Redis 6的新特性
 
-以下命令/功能在Sharding/Cluster模式下不支持:
-
-- BITOP
-- EVAL
-- EVALSHA
-- MULTI & EXEC
-- PFMERGE
-- SDIFFSTORE
-- SINTERSTORE
-- SUNIONSTORE
-- ZUNIONSTORE
-- ZINTERSTORE
-- Pub/Sub
+- 以下命令/功能在Sharding/Cluster模式下不支持:
+    - BITOP
+    - EVAL
+    - EVALSHA
+    - MULTI & EXEC
+    - PFMERGE
+    - SDIFFSTORE
+    - SINTERSTORE
+    - SUNIONSTORE
+    - ZUNIONSTORE
+    - ZINTERSTORE
+    - Pub/Sub
+    
+- 程序在正常退出时, 会在工作目录下创建`.copy-redis`文件夹, 里面存放了replication相关的id和offset.
+ 在程序启动时, 会从`.copy-redis`文件夹中获取之前保存的信息, 若成功获取到之前保存的数据, 则以此去请求`partial replication`,
+ 这样可以继续之前的replication进度, 以免触发`full replication`. 
