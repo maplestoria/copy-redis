@@ -17,3 +17,6 @@ ctrlc = { version = "3.0", features = ["termination"] }
 murmurhash64 = "0.3.1"
 r2d2_redis = "0.13.0"
 scheduled-thread-pool = "0.2.4"
+
+[dev-dependencies]
+serial_test = "0.3.2"

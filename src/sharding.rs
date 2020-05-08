@@ -259,20 +259,3 @@ pub(crate) fn new_sharded(initial_nodes: Vec<String>, batch_size: i32, flush_int
         senders: RefCell::new(senders),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::sharding::ShardedClient;
-    
-    #[test]
-    fn test_client() {
-        let nodes = vec!["redis://127.0.0.1:6379/", "redis://127.0.0.1:6479/"];
-        let client = ShardedClient::open(nodes).unwrap();
-        let mut cmd = redis::cmd("set");
-        cmd.arg("helloworld").arg("回复开始打卡的");
-        client.execute(cmd);
-        cmd = redis::cmd("set");
-        cmd.arg("aaa").arg("aaa");
-        client.execute(cmd);
-    }
-}
