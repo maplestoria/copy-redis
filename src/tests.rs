@@ -6,12 +6,10 @@ mod integrate_tests {
     
     use r2d2_redis::redis::RedisResult;
     use redis::Commands;
-    use serial_test::serial;
     
     use crate::{Opt, run};
     
     #[test]
-    #[serial]
     fn test_standalone() {
         let redis_source = start_redis_server(16379);
         let redis_target = start_redis_server(16380);
@@ -50,7 +48,6 @@ mod integrate_tests {
     }
     
     #[test]
-    #[serial]
     fn test_sharding() {
         let redis_source = start_redis_server(16479);
         let redis_target = start_redis_server(16480);
