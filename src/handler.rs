@@ -1,13 +1,14 @@
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 
-use redis_event::{Event, EventHandler};
-use redis_event::Event::{AOF, RDB};
 use redis_event::rdb::Object;
+use redis_event::Event::{AOF, RDB};
+use redis_event::{Event, EventHandler};
 
 use crate::command::CommandConverter;
 use crate::worker;
 use crate::worker::{Message, Worker};
+use redis::Cmd;
 
 pub(crate) struct EventHandlerImpl {
     worker: Worker,
@@ -16,43 +17,34 @@ pub(crate) struct EventHandlerImpl {
 
 impl EventHandler for EventHandlerImpl {
     fn handle(&mut self, event: Event) {
-        let cmd = match event {
-            RDB(rdb) => {
-                match rdb {
-                    Object::Stream(key, stream) => {
-                        for (id, entry) in stream.entries {
-                            let mut cmd = redis::cmd("XADD");
-                            cmd.arg(key.as_slice());
-                            cmd.arg(id.to_string());
-                            for (field, value) in entry.fields {
-                                cmd.arg(field).arg(value);
-                            }
-                            if let Err(err) = self.sender.send(Message::Cmd(cmd)) {
-                                panic!("{}", err)
-                            }
+        match event {
+            RDB(rdb) => match rdb {
+                Object::Stream(key, stream) => {
+                    for (id, entry) in stream.entries {
+                        let mut cmd = redis::cmd("XADD");
+                        cmd.arg(key.as_slice());
+                        cmd.arg(id.to_string());
+                        for (field, value) in entry.fields {
+                            cmd.arg(field).arg(value);
                         }
-                        for group in stream.groups {
-                            let mut cmd = redis::cmd("XGROUP");
-                            cmd.arg("CREATE").arg(key.as_slice())
-                                .arg(group.name).arg(group.last_id.to_string());
-                            if let Err(err) = self.sender.send(Message::Cmd(cmd)) {
-                                panic!("{}", err)
-                            }
-                        }
-                        None
+                        self.execute(cmd, None);
                     }
-                    _ => self.handle_rdb(rdb)
+                    for group in stream.groups {
+                        let mut cmd = redis::cmd("XGROUP");
+                        cmd.arg("CREATE")
+                            .arg(key.as_slice())
+                            .arg(group.name)
+                            .arg(group.last_id.to_string());
+
+                        self.execute(cmd, None);
+                    }
                 }
-            }
+                _ => self.handle_rdb(rdb),
+            },
             AOF(cmd) => {
-                self.handle_aof(cmd)
+                self.handle_aof(cmd);
             }
         };
-        if let Some(cmd) = cmd {
-            if let Err(err) = self.sender.send(Message::Cmd(cmd)) {
-                panic!("{}", err)
-            }
-        }
     }
 }
 
@@ -65,11 +57,27 @@ impl Drop for EventHandlerImpl {
     }
 }
 
+impl CommandConverter for EventHandlerImpl {
+    fn execute(&mut self, cmd: Cmd, _: Option<&[u8]>) {
+        if let Err(err) = self.sender.send(Message::Cmd(cmd)) {
+            panic!("{}", err)
+        }
+    }
+}
+
 pub(crate) fn new(target: String, batch_size: i32, flush_interval: u64) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
-    let worker_thread = worker::new_worker(target, receiver, "copy_redis::worker", batch_size, flush_interval);
+    let worker_thread = worker::new_worker(
+        target,
+        receiver,
+        "copy_redis::worker",
+        batch_size,
+        flush_interval,
+    );
     EventHandlerImpl {
-        worker: Worker { thread: Option::Some(worker_thread) },
+        worker: Worker {
+            thread: Option::Some(worker_thread),
+        },
         sender,
     }
 }

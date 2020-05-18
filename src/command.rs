@@ -1,19 +1,20 @@
 use redis::Cmd;
-use redis_event::cmd::Command;
 use redis_event::cmd::keys::ORDER;
 use redis_event::cmd::lists::POSITION;
 use redis_event::cmd::sorted_sets::AGGREGATE;
 use redis_event::cmd::strings::{ExistType, ExpireType, Op, Operation, Overflow};
-use redis_event::EventHandler;
+use redis_event::cmd::Command;
+use redis_event::rdb;
 use redis_event::rdb::Object;
 
 pub trait CommandConverter {
-    fn handle_rdb(&mut self, rdb: Object) -> Option<Cmd> {
+    fn handle_rdb(&mut self, rdb: Object) {
         match rdb {
             Object::String(kv) => {
                 let mut cmd = redis::cmd("set");
                 cmd.arg(kv.key).arg(kv.value);
-                return Some(cmd);
+                self.execute(cmd, None);
+                self.handle_expire(kv.key, &kv.meta.expire);
             }
             Object::List(list) => {
                 let mut cmd = redis::cmd("rpush");
@@ -21,7 +22,8 @@ pub trait CommandConverter {
                 for val in list.values {
                     cmd.arg(val.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
+                self.handle_expire(list.key, &list.meta.expire);
             }
             Object::Set(set) => {
                 let mut cmd = redis::cmd("sadd");
@@ -29,7 +31,8 @@ pub trait CommandConverter {
                 for member in set.members {
                     cmd.arg(member.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
+                self.handle_expire(set.key, &set.meta.expire);
             }
             Object::SortedSet(sorted_set) => {
                 let mut cmd = redis::cmd("zadd");
@@ -37,7 +40,8 @@ pub trait CommandConverter {
                 for item in sorted_set.items {
                     cmd.arg(item.score).arg(item.member.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
+                self.handle_expire(sorted_set.key, &sorted_set.meta.expire);
             }
             Object::Hash(hash) => {
                 let mut cmd = redis::cmd("hmset");
@@ -45,18 +49,39 @@ pub trait CommandConverter {
                 for field in hash.fields {
                     cmd.arg(field.name.as_slice()).arg(field.value.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
+                self.handle_expire(hash.key, &hash.meta.expire);
             }
-            _ => return None
+            Object::Stream(key, stream) => {
+                for (id, entry) in stream.entries {
+                    let mut cmd = redis::cmd("XADD");
+                    cmd.arg(key.as_slice());
+                    cmd.arg(id.to_string());
+                    for (field, value) in entry.fields {
+                        cmd.arg(field).arg(value);
+                    }
+                    self.execute(cmd, Some(key.as_slice()));
+                }
+                for group in stream.groups {
+                    let mut cmd = redis::cmd("XGROUP");
+                    cmd.arg("CREATE")
+                        .arg(key.as_slice())
+                        .arg(group.name)
+                        .arg(group.last_id.to_string());
+                    self.execute(cmd, Some(key.as_slice()));
+                }
+                self.handle_expire(key.as_slice(), &stream.meta.expire);
+            }
+            _ => {}
         };
     }
-    
-    fn handle_aof(&mut self, cmd: Command) -> Option<Cmd> {
+
+    fn handle_aof(&mut self, cmd: Command) {
         match cmd {
             Command::APPEND(append) => {
                 let mut cmd = redis::cmd("APPEND");
                 cmd.arg(append.key).arg(append.value);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::BITFIELD(bitfield) => {
                 let mut cmd = redis::cmd("BITFIELD");
@@ -68,7 +93,10 @@ pub trait CommandConverter {
                                 cmd.arg("GET").arg(get._type).arg(get.offset);
                             }
                             Operation::INCRBY(incrby) => {
-                                cmd.arg("INCRBY").arg(incrby._type).arg(incrby.offset).arg(incrby.increment);
+                                cmd.arg("INCRBY")
+                                    .arg(incrby._type)
+                                    .arg(incrby.offset)
+                                    .arg(incrby.increment);
                             }
                             Operation::SET(set) => {
                                 cmd.arg("SET").arg(set._type).arg(set.offset).arg(set.value);
@@ -91,7 +119,7 @@ pub trait CommandConverter {
                         }
                     }
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::BITOP(bitop) => {
                 let mut cmd = redis::cmd("BITOP");
@@ -113,31 +141,31 @@ pub trait CommandConverter {
                 for key in &bitop.keys {
                     cmd.arg(key.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::BRPOPLPUSH(brpoplpush) => {
                 let mut cmd = redis::cmd("BRPOPLPUSH");
                 cmd.arg(brpoplpush.source)
                     .arg(brpoplpush.destination)
                     .arg(brpoplpush.timeout);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::DECR(decr) => {
                 let mut cmd = redis::cmd("DECR");
                 cmd.arg(decr.key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::DECRBY(decrby) => {
                 let mut cmd = redis::cmd("DECRBY");
                 cmd.arg(decrby.key).arg(decrby.decrement);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::DEL(del) => {
                 let mut cmd = redis::cmd("DEL");
                 for key in &del.keys {
                     cmd.arg(key.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::EVAL(eval) => {
                 let mut cmd = redis::cmd("EVAL");
@@ -148,7 +176,7 @@ pub trait CommandConverter {
                 for arg in &eval.args {
                     cmd.arg(*arg);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::EVALSHA(evalsha) => {
                 let mut cmd = redis::cmd("EVALSHA");
@@ -159,40 +187,40 @@ pub trait CommandConverter {
                 for arg in &evalsha.args {
                     cmd.arg(*arg);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::EXPIRE(expire) => {
                 let mut cmd = redis::cmd("EXPIRE");
                 cmd.arg(expire.key).arg(expire.seconds);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::EXPIREAT(expireat) => {
                 let mut cmd = redis::cmd("EXPIREAT");
                 cmd.arg(expireat.key).arg(expireat.timestamp);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::EXEC => {
                 let cmd = redis::cmd("EXEC");
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::FLUSHALL(flushall) => {
                 let mut cmd = redis::cmd("FLUSHALL");
                 if flushall._async.is_some() {
                     cmd.arg("ASYNC");
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::FLUSHDB(flushdb) => {
                 let mut cmd = redis::cmd("FLUSHDB");
                 if flushdb._async.is_some() {
                     cmd.arg("ASYNC");
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::GETSET(getset) => {
                 let mut cmd = redis::cmd("GETSET");
                 cmd.arg(getset.key).arg(getset.value);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::HDEL(hdel) => {
                 let mut cmd = redis::cmd("HDEL");
@@ -200,12 +228,14 @@ pub trait CommandConverter {
                 for field in &hdel.fields {
                     cmd.arg(*field);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::HINCRBY(hincrby) => {
                 let mut cmd = redis::cmd("HINCRBY");
-                cmd.arg(hincrby.key).arg(hincrby.field).arg(hincrby.increment);
-                return Some(cmd);
+                cmd.arg(hincrby.key)
+                    .arg(hincrby.field)
+                    .arg(hincrby.increment);
+                self.execute(cmd, None);
             }
             Command::HMSET(hmset) => {
                 let mut cmd = redis::cmd("HMSET");
@@ -213,7 +243,7 @@ pub trait CommandConverter {
                 for field in &hmset.fields {
                     cmd.arg(field.name).arg(field.value);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::HSET(hset) => {
                 let mut cmd = redis::cmd("HSET");
@@ -221,22 +251,22 @@ pub trait CommandConverter {
                 for field in &hset.fields {
                     cmd.arg(field.name).arg(field.value);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::HSETNX(hsetnx) => {
                 let mut cmd = redis::cmd("HSETNX");
                 cmd.arg(hsetnx.key).arg(hsetnx.field).arg(hsetnx.value);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::INCR(incr) => {
                 let mut cmd = redis::cmd("INCR");
                 cmd.arg(incr.key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::INCRBY(incrby) => {
                 let mut cmd = redis::cmd("INCRBY");
                 cmd.arg(incrby.key).arg(incrby.increment);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LINSERT(linsert) => {
                 let mut cmd = redis::cmd("LINSERT");
@@ -250,12 +280,12 @@ pub trait CommandConverter {
                     }
                 }
                 cmd.arg(linsert.pivot).arg(linsert.element);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LPOP(lpop) => {
                 let mut cmd = redis::cmd("LPOP");
                 cmd.arg(lpop.key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LPUSH(lpush) => {
                 let mut cmd = redis::cmd("LPUSH");
@@ -263,7 +293,7 @@ pub trait CommandConverter {
                 for element in &lpush.elements {
                     cmd.arg(*element);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LPUSHX(lpushx) => {
                 let mut cmd = redis::cmd("LPUSHX");
@@ -271,60 +301,60 @@ pub trait CommandConverter {
                 for element in &lpushx.elements {
                     cmd.arg(*element);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LREM(lrem) => {
                 let mut cmd = redis::cmd("LREM");
                 cmd.arg(lrem.key).arg(lrem.count).arg(lrem.element);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LSET(lset) => {
                 let mut cmd = redis::cmd("LSET");
                 cmd.arg(lset.key).arg(lset.index).arg(lset.element);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::LTRIM(ltrim) => {
                 let mut cmd = redis::cmd("LTRIM");
                 cmd.arg(ltrim.key).arg(ltrim.start).arg(ltrim.stop);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::MOVE(_move) => {
                 let mut cmd = redis::cmd("MOVE");
                 cmd.arg(_move.key).arg(_move.db);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::MSET(mset) => {
                 let mut cmd = redis::cmd("MSET");
                 for kv in &mset.key_values {
                     cmd.arg(kv.key).arg(kv.value);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::MSETNX(msetnx) => {
                 let mut cmd = redis::cmd("MSETNX");
                 for kv in &msetnx.key_values {
                     cmd.arg(kv.key).arg(kv.value);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::MULTI => {
                 let cmd = redis::cmd("MULTI");
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PERSIST(persist) => {
                 let mut cmd = redis::cmd("PERSIST");
                 cmd.arg(persist.key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PEXPIRE(pexpire) => {
                 let mut cmd = redis::cmd("PEXPIRE");
                 cmd.arg(pexpire.milliseconds);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PEXPIREAT(pexpireat) => {
                 let mut cmd = redis::cmd("PEXPIREAT");
                 cmd.arg(pexpireat.mill_timestamp);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PFADD(pfadd) => {
                 let mut cmd = redis::cmd("PFADD");
@@ -332,14 +362,14 @@ pub trait CommandConverter {
                 for element in &pfadd.elements {
                     cmd.arg(*element);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PFCOUNT(pfcount) => {
                 let mut cmd = redis::cmd("PFCOUNT");
                 for key in &pfcount.keys {
                     cmd.arg(*key);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PFMERGE(pfmerge) => {
                 let mut cmd = redis::cmd("PFMERGE");
@@ -347,27 +377,29 @@ pub trait CommandConverter {
                 for key in &pfmerge.source_keys {
                     cmd.arg(*key);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::PSETEX(psetex) => {
                 let mut cmd = redis::cmd("PSETEX");
-                cmd.arg(psetex.key).arg(psetex.milliseconds).arg(psetex.value);
-                return Some(cmd);
+                cmd.arg(psetex.key)
+                    .arg(psetex.milliseconds)
+                    .arg(psetex.value);
+                self.execute(cmd, None);
             }
             Command::PUBLISH(publish) => {
                 let mut cmd = redis::cmd("PUBLISH");
                 cmd.arg(publish.channel).arg(publish.message);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RENAME(rename) => {
                 let mut cmd = redis::cmd("RENAME");
                 cmd.arg(rename.key).arg(rename.new_key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RENAMENX(renamenx) => {
                 let mut cmd = redis::cmd("RENAMENX");
                 cmd.arg(renamenx.key).arg(renamenx.new_key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RESTORE(restore) => {
                 let mut cmd = redis::cmd("RESTORE");
@@ -384,17 +416,17 @@ pub trait CommandConverter {
                 if let Some(freq) = restore.freq {
                     cmd.arg("FREQ").arg(freq);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RPOP(rpop) => {
                 let mut cmd = redis::cmd("RPOP");
                 cmd.arg(rpop.key);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RPOPLPUSH(rpoplpush) => {
                 let mut cmd = redis::cmd("RPOPLPUSH");
                 cmd.arg(rpoplpush.source).arg(rpoplpush.destination);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RPUSH(rpush) => {
                 let mut cmd = redis::cmd("RPUSH");
@@ -402,7 +434,7 @@ pub trait CommandConverter {
                 for element in &rpush.elements {
                     cmd.arg(*element);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::RPUSHX(rpushx) => {
                 let mut cmd = redis::cmd("RPUSHX");
@@ -410,7 +442,7 @@ pub trait CommandConverter {
                 for element in &rpushx.elements {
                     cmd.arg(*element);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SADD(sadd) => {
                 let mut cmd = redis::cmd("SADD");
@@ -418,17 +450,17 @@ pub trait CommandConverter {
                 for member in &sadd.members {
                     cmd.arg(*member);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SCRIPTFLUSH => {
                 let mut cmd = redis::cmd("SCRIPT");
                 cmd.arg("FLUSH");
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SCRIPTLOAD(scriptload) => {
                 let mut cmd = redis::cmd("SCRIPT");
                 cmd.arg("LOAD").arg(scriptload.script);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SDIFFSTORE(sdiffstore) => {
                 let mut cmd = redis::cmd("SDIFFSTORE");
@@ -436,7 +468,7 @@ pub trait CommandConverter {
                 for key in &sdiffstore.keys {
                     cmd.arg(*key);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SET(set) => {
                 let mut cmd = redis::cmd("SET");
@@ -461,32 +493,34 @@ pub trait CommandConverter {
                         }
                     }
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SETBIT(setbit) => {
                 let mut cmd = redis::cmd("SETBIT");
                 cmd.arg(setbit.key).arg(setbit.offset).arg(setbit.value);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SETEX(setex) => {
                 let mut cmd = redis::cmd("SETEX");
                 cmd.arg(setex.key).arg(setex.seconds).arg(setex.value);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SETNX(setnx) => {
                 let mut cmd = redis::cmd("SETNX");
                 cmd.arg(setnx.key).arg(setnx.value);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SELECT(select) => {
                 let mut cmd = redis::cmd("SELECT");
                 cmd.arg(select.db);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SETRANGE(setrange) => {
                 let mut cmd = redis::cmd("SETRANGE");
-                cmd.arg(setrange.key).arg(setrange.offset).arg(setrange.value);
-                return Some(cmd);
+                cmd.arg(setrange.key)
+                    .arg(setrange.offset)
+                    .arg(setrange.value);
+                self.execute(cmd, None);
             }
             Command::SINTERSTORE(sinterstore) => {
                 let mut cmd = redis::cmd("SINTERSTORE");
@@ -494,12 +528,14 @@ pub trait CommandConverter {
                 for key in &sinterstore.keys {
                     cmd.arg(*key);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SMOVE(smove) => {
                 let mut cmd = redis::cmd("SMOVE");
-                cmd.arg(smove.source).arg(smove.destination).arg(smove.member);
-                return Some(cmd);
+                cmd.arg(smove.source)
+                    .arg(smove.destination)
+                    .arg(smove.member);
+                self.execute(cmd, None);
             }
             Command::SORT(sort) => {
                 let mut cmd = redis::cmd("SORT");
@@ -531,7 +567,7 @@ pub trait CommandConverter {
                 if let Some(dest) = sort.destination {
                     cmd.arg("STORE").arg(dest);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SREM(srem) => {
                 let mut cmd = redis::cmd("SREM");
@@ -539,7 +575,7 @@ pub trait CommandConverter {
                 for member in &srem.members {
                     cmd.arg(*member);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SUNIONSTORE(sunion) => {
                 let mut cmd = redis::cmd("SUNIONSTORE");
@@ -547,19 +583,19 @@ pub trait CommandConverter {
                 for key in &sunion.keys {
                     cmd.arg(*key);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::SWAPDB(swapdb) => {
                 let mut cmd = redis::cmd("SWAPDB");
                 cmd.arg(swapdb.index1).arg(swapdb.index2);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::UNLINK(unlink) => {
                 let mut cmd = redis::cmd("UNLINK");
                 for key in &unlink.keys {
                     cmd.arg(*key);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZADD(zadd) => {
                 let mut cmd = redis::cmd("ZADD");
@@ -583,12 +619,14 @@ pub trait CommandConverter {
                 for item in &zadd.items {
                     cmd.arg(item.score).arg(item.member);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZINCRBY(zincrby) => {
                 let mut cmd = redis::cmd("ZINCRBY");
-                cmd.arg(zincrby.key).arg(zincrby.increment).arg(zincrby.member);
-                return Some(cmd);
+                cmd.arg(zincrby.key)
+                    .arg(zincrby.increment)
+                    .arg(zincrby.member);
+                self.execute(cmd, None);
             }
             Command::ZINTERSTORE(zinterstore) => {
                 let mut cmd = redis::cmd("ZINTERSTORE");
@@ -605,12 +643,18 @@ pub trait CommandConverter {
                 if let Some(aggregate) = &zinterstore.aggregate {
                     cmd.arg("AGGREGATE");
                     match aggregate {
-                        AGGREGATE::SUM => { cmd.arg("SUM"); }
-                        AGGREGATE::MIN => { cmd.arg("MIN"); }
-                        AGGREGATE::MAX => { cmd.arg("MAX"); }
+                        AGGREGATE::SUM => {
+                            cmd.arg("SUM");
+                        }
+                        AGGREGATE::MIN => {
+                            cmd.arg("MIN");
+                        }
+                        AGGREGATE::MAX => {
+                            cmd.arg("MAX");
+                        }
                     }
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZPOPMAX(zpopmax) => {
                 let mut cmd = redis::cmd("ZPOPMAX");
@@ -618,7 +662,7 @@ pub trait CommandConverter {
                 if let Some(count) = zpopmax.count {
                     cmd.arg(count);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZPOPMIN(zpopmin) => {
                 let mut cmd = redis::cmd("ZPOPMIN");
@@ -626,7 +670,7 @@ pub trait CommandConverter {
                 if let Some(count) = zpopmin.count {
                     cmd.arg(count);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZREM(zrem) => {
                 let mut cmd = redis::cmd("ZREM");
@@ -634,26 +678,28 @@ pub trait CommandConverter {
                 for member in &zrem.members {
                     cmd.arg(*member);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZREMRANGEBYLEX(zrem) => {
                 let mut cmd = redis::cmd("ZREMRANGEBYLEX");
                 cmd.arg(zrem.key).arg(zrem.min).arg(zrem.max);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZREMRANGEBYRANK(zrem) => {
                 let mut cmd = redis::cmd("ZREMRANGEBYRANK");
                 cmd.arg(zrem.key).arg(zrem.start).arg(zrem.stop);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZREMRANGEBYSCORE(zrem) => {
                 let mut cmd = redis::cmd("ZREMRANGEBYSCORE");
                 cmd.arg(zrem.key).arg(zrem.min).arg(zrem.max);
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::ZUNIONSTORE(zunion) => {
                 let mut cmd = redis::cmd("ZUNIONSTORE");
-                cmd.arg(zunion.destination).arg(zunion.destination).arg(zunion.num_keys);
+                cmd.arg(zunion.destination)
+                    .arg(zunion.destination)
+                    .arg(zunion.num_keys);
                 for key in &zunion.keys {
                     cmd.arg(*key);
                 }
@@ -677,14 +723,14 @@ pub trait CommandConverter {
                         }
                     }
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::Other(raw_cmd) => {
                 let mut cmd = redis::cmd(&raw_cmd.name);
                 for arg in raw_cmd.args {
                     cmd.arg(arg);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::XACK(xack) => {
                 let mut cmd = redis::cmd("XACK");
@@ -692,7 +738,7 @@ pub trait CommandConverter {
                 for id in &xack.ids {
                     cmd.arg(id.as_slice());
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::XADD(xadd) => {
                 let mut cmd = redis::cmd("XADD");
@@ -700,11 +746,13 @@ pub trait CommandConverter {
                 for field in &xadd.fields {
                     cmd.arg(field.name).arg(field.value);
                 }
-                return Some(cmd);
+                self.execute(cmd, None);
             }
             Command::XCLAIM(xclaim) => {
                 let mut cmd = redis::cmd("XCLAIM");
-                cmd.arg(xclaim.key).arg(xclaim.group).arg(xclaim.consumer)
+                cmd.arg(xclaim.key)
+                    .arg(xclaim.group)
+                    .arg(xclaim.consumer)
                     .arg(xclaim.min_idle_time);
                 for id in &xclaim.ids {
                     cmd.arg(id.as_slice());
@@ -724,7 +772,7 @@ pub trait CommandConverter {
                 if let Some(_) = xclaim.just_id {
                     cmd.arg("JUSTID");
                 }
-                Some(cmd)
+                self.execute(cmd, None);
             }
             Command::XDEL(xdel) => {
                 let mut cmd = redis::cmd("XDEL");
@@ -732,23 +780,32 @@ pub trait CommandConverter {
                 for id in &xdel.ids {
                     cmd.arg(id.as_slice());
                 }
-                Some(cmd)
+                self.execute(cmd, None);
             }
             Command::XGROUP(xgroup) => {
                 let mut cmd = redis::cmd("XGROUP");
                 if let Some(create) = &xgroup.create {
-                    cmd.arg("CREATE").arg(create.key).arg(create.group_name).arg(create.id);
+                    cmd.arg("CREATE")
+                        .arg(create.key)
+                        .arg(create.group_name)
+                        .arg(create.id);
                 }
                 if let Some(set_id) = &xgroup.set_id {
-                    cmd.arg("SETID").arg(set_id.key).arg(set_id.group_name).arg(set_id.id);
+                    cmd.arg("SETID")
+                        .arg(set_id.key)
+                        .arg(set_id.group_name)
+                        .arg(set_id.id);
                 }
                 if let Some(destroy) = &xgroup.destroy {
                     cmd.arg("DESTROY").arg(destroy.key).arg(destroy.group_name);
                 }
                 if let Some(del_consumer) = &xgroup.del_consumer {
-                    cmd.arg("DELCONSUMER").arg(del_consumer.key).arg(del_consumer.group_name).arg(del_consumer.consumer_name);
+                    cmd.arg("DELCONSUMER")
+                        .arg(del_consumer.key)
+                        .arg(del_consumer.group_name)
+                        .arg(del_consumer.consumer_name);
                 }
-                Some(cmd)
+                self.execute(cmd, None);
             }
             Command::XTRIM(xtrim) => {
                 let mut cmd = redis::cmd("XTRIM");
@@ -757,10 +814,27 @@ pub trait CommandConverter {
                     cmd.arg("~");
                 }
                 cmd.arg(xtrim.count);
-                Some(cmd)
+                self.execute(cmd, None);
             }
         }
     }
-}
 
-impl<R: EventHandler + ?Sized> CommandConverter for R {}
+    fn handle_expire(&mut self, key: &[u8], expire: &Option<(rdb::ExpireType, i64)>) {
+        if let Some((expire_type, ttl)) = expire {
+            match expire_type {
+                rdb::ExpireType::Second => {
+                    let mut cmd = redis::cmd("EXPIREAT");
+                    cmd.arg(key).arg(*ttl);
+                    self.execute(cmd, Some(key));
+                }
+                rdb::ExpireType::Millisecond => {
+                    let mut cmd = redis::cmd("PEXPIREAT");
+                    cmd.arg(key).arg(*ttl);
+                    self.execute(cmd, Some(key));
+                }
+            }
+        }
+    }
+
+    fn execute(&mut self, cmd: Cmd, key: Option<&[u8]>);
+}
