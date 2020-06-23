@@ -54,8 +54,10 @@ fn run(opt: Opt) {
     // 等命令被handler处理完之后，listener才能结束，而且handler的结束还必须在listener之后，要不然丢数据
     let is_running = Arc::new(AtomicBool::new(true));
     setup_ctrlc_handler(is_running.clone());
-
-    let mut listener = listener::new(config, is_running.clone());
+    
+    let mut builder = listener::Builder::new();
+    builder.with_config(config);
+    builder.with_control_flag(Arc::clone(&is_running));
 
     if opt.sharding || opt.cluster {
         if opt.sharding && opt.cluster {
@@ -64,10 +66,10 @@ fn run(opt: Opt) {
         if opt.sharding {
             let event_handler =
                 sharding::new_sharded(opt.targets, opt.batch_size, opt.flush_interval);
-            listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
+            builder.with_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
             let event_handler = cluster::new_cluster(opt.targets, is_running.clone());
-            listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
+            builder.with_event_handler(Rc::new(RefCell::new(event_handler)));
         }
     } else {
         let event_handler = handler::new(
@@ -75,8 +77,9 @@ fn run(opt: Opt) {
             opt.batch_size,
             opt.flush_interval,
         );
-        listener.set_event_handler(Rc::new(RefCell::new(event_handler)));
+        builder.with_event_handler(Rc::new(RefCell::new(event_handler)));
     }
+    let mut listener = builder.build();
 
     while is_running.load(Ordering::Relaxed) {
         if let Err(error) = listener.start() {
