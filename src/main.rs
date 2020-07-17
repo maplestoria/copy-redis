@@ -9,7 +9,6 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::io::{Error, Read, Write};
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
@@ -40,14 +39,15 @@ fn main() {
 }
 
 fn run(opt: Opt) {
-    let (socket_addr, source_passwd) = get_source_addr_passwd(&opt);
-    let source_addr = socket_addr.to_string();
+    let (source_host,source_port, source_passwd) = get_source_addr_passwd(&opt);
+    let source_addr = format!("{}:{}", &source_host, source_port);
     let config = new_redis_listener_config(
         opt.discard_rdb,
         opt.aof,
-        socket_addr,
-        source_passwd,
         &source_addr,
+        source_passwd,
+        &source_host,
+        source_port,
     );
     // 先关闭listener，因为listener在读取流中的数据时，是阻塞的，
     // 所以在接收到ctrl-c信号的时候，得再等一会，等redis master的数据来到(或者读取超时)，此时，程序才会继续运行，
@@ -103,21 +103,24 @@ fn run(opt: Opt) {
 fn new_redis_listener_config(
     is_discard_rdb: bool,
     is_aof: bool,
-    socket_addr: SocketAddr,
-    source_passwd: Option<String>,
     source_addr: &String,
+    source_passwd: Option<String>,
+    source_host: &String,
+    source_port: i16
 ) -> Config {
     let mut config = redis_event::config::Config {
         is_discard_rdb,
         is_aof,
-        addr: socket_addr,
+        host: source_host.to_string(),
+        port: source_port,
         password: source_passwd.unwrap_or_default(),
         repl_id: "?".to_string(),
         repl_offset: -1,
         read_timeout: None,
         write_timeout: None,
+        is_tls_enabled: true
     };
-    if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
+    if let Ok((repl_id, repl_offset)) = load_repl_meta(source_addr) {
         info!(
             "获取到PSYNC记录信息, id: {}, offset: {}",
             repl_id, repl_offset
@@ -128,21 +131,21 @@ fn new_redis_listener_config(
     config
 }
 
-fn get_source_addr_passwd(opt: &Opt) -> (SocketAddr, Option<String>) {
+fn get_source_addr_passwd(opt: &Opt) -> (String, i16, Option<String>) {
     let source = opt
         .source
         .as_str()
         .into_connection_info()
         .expect("源Redis URI无效");
-    let socket_addr;
+    let source_host;
+    let source_port;
     if let ConnectionAddr::Tcp(host, port) = source.addr.as_ref() {
-        let addr = format!("{}:{}", host, port);
-        let mut iter = addr.to_socket_addrs().expect("");
-        socket_addr = iter.next().unwrap();
+        source_host = host.clone();
+        source_port = *port as i16;
     } else {
         unimplemented!("Unix Domain Socket");
     }
-    (socket_addr, source.passwd)
+    (source_host, source_port, source.passwd)
 }
 
 fn setup_ctrlc_handler(r1: Arc<AtomicBool>) {
