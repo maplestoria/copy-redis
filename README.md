@@ -9,7 +9,7 @@ $ copy-redis -h
 Usage: copy-redis [options]
 
 Options:
-    -s, --source 源Redis的URI, 格式:"redis://[:password@]host:port[/db]"
+    -s, --source 源Redis的URI, 格式: "redis[s]://[:password@]host:port[/#insecure]"
                         此Redis内的数据将复制到目的Redis中
     -t, --target 目的Redis的URI, URI格式同上
 
@@ -23,6 +23,9 @@ Options:
                         发送至Redis的每一批命令的最大数量, 若<=0则不限制数量
     -i, --flush-interval 100
                         发送命令的最短间隔时间(毫秒)
+        --identity      客户端认证所使用的Key
+        --identity-passwd
+                        解密Key所需的密码
     -h, --help          输出帮助信息
     -v, --version
 ```
