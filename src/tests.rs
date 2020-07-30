@@ -33,6 +33,8 @@ mod integrate_tests {
             cluster: false,
             batch_size: 100,
             flush_interval: 100,
+            identity: None,
+            identity_passwd: None
         };
         run(opt);
 
@@ -73,6 +75,8 @@ mod integrate_tests {
             cluster: false,
             batch_size: 100,
             flush_interval: 100,
+            identity: None,
+            identity_passwd: None
         };
         run(opt);
 

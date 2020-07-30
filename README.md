@@ -23,9 +23,9 @@ Options:
                         发送至Redis的每一批命令的最大数量, 若<=0则不限制数量
     -i, --flush-interval 100
                         发送命令的最短间隔时间(毫秒)
-        --identity      客户端认证所使用的Key
+        --identity      与源Redis进行TLS认证时验证自身身份所使用的Key文件路径
         --identity-passwd
-                        解密Key所需的密码
+                        identity参数所指定的key文件解密时所需的密码
     -h, --help          输出帮助信息
     -v, --version
 ```

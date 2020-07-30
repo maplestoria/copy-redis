@@ -219,7 +219,7 @@ fn parse_args(args: Vec<String>) -> Opt {
         "s",
         "source",
         "此Redis内的数据将复制到目的Redis中",
-        "源Redis的URI, 格式:\"redis://[:password@]host:port[/db]\"",
+        "源Redis的URI, 格式: \"redis[s]://[:password@]host:port[/#insecure]\"",
     );
     opts.optmulti("t", "target", "", "目的Redis的URI, URI格式同上");
     opts.optflag(
@@ -242,8 +242,8 @@ fn parse_args(args: Vec<String>) -> Opt {
         "2500",
     );
     opts.optopt("i", "flush-interval", "发送命令的最短间隔时间(毫秒)", "100");
-    opts.optopt("", "identity", "客户端认证所使用的Key", "");
-    opts.optopt("", "identity-passwd", "解密Key所需的密码", "");
+    opts.optopt("", "identity", "与源Redis进行TLS认证时验证自身身份所使用的Key文件路径", "");
+    opts.optopt("", "identity-passwd", "identity参数所指定的key文件解密时所需的密码", "");
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
 
