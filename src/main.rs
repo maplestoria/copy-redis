@@ -109,20 +109,22 @@ fn new_redis_listener_config(opt: &Opt) -> Config {
         None => false,
         Some(q) => q == "insecure",
     };
-    
+
     let source_host = url.host().unwrap().to_string();
     let source_port = url.port().unwrap() as i16;
-    
+
+    let username = url.username().to_string();
     let password = match &url.password() {
         None => String::from(""),
         Some(passwd) => passwd.to_string(),
     };
-    
+
     let mut config = redis_event::config::Config {
         is_discard_rdb: opt.discard_rdb,
         is_aof: opt.aof,
         host: source_host.to_string(),
         port: source_port,
+        username,
         password,
         repl_id: "?".to_string(),
         repl_offset: -1,
@@ -242,8 +244,18 @@ fn parse_args(args: Vec<String>) -> Opt {
         "2500",
     );
     opts.optopt("i", "flush-interval", "发送命令的最短间隔时间(毫秒)", "100");
-    opts.optopt("", "identity", "与源Redis进行TLS认证时验证自身身份所使用的Key文件路径", "");
-    opts.optopt("", "identity-passwd", "identity参数所指定的key文件解密时所需的密码", "");
+    opts.optopt(
+        "",
+        "identity",
+        "与源Redis进行TLS认证时验证自身身份所使用的Key文件路径",
+        "",
+    );
+    opts.optopt(
+        "",
+        "identity-passwd",
+        "identity参数所指定的key文件解密时所需的密码",
+        "",
+    );
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
 

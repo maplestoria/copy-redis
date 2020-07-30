@@ -34,7 +34,7 @@ mod integrate_tests {
             batch_size: 100,
             flush_interval: 100,
             identity: None,
-            identity_passwd: None
+            identity_passwd: None,
         };
         run(opt);
 
@@ -76,7 +76,7 @@ mod integrate_tests {
             batch_size: 100,
             flush_interval: 100,
             identity: None,
-            identity_passwd: None
+            identity_passwd: None,
         };
         run(opt);
 
