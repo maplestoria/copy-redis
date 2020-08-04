@@ -81,8 +81,6 @@ $ copy-redis -s redis://127.0.0.1:6379 -t redis://127.0.0.1:6479 --cluster
 
 - 只有Cluster模式目前不支持pipeline, 所以写入效率较低
 
-- 暂不支持Redis 6的新特性
-
 - 以下命令/功能在Sharding/Cluster模式下不支持:
     - BITOP
     - EVAL
