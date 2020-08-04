@@ -493,6 +493,9 @@ pub trait CommandConverter {
                         }
                     }
                 }
+                if set.keep_ttl.as_ref().is_some() {
+                    cmd.arg("KEEPTTL");
+                }
                 self.execute(cmd, None);
             }
             Command::SETBIT(setbit) => {

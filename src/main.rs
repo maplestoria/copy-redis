@@ -8,8 +8,7 @@ use std::fs;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::io::{Error, Read, Write};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::io::{Error, ErrorKind, Read, Write};
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
@@ -20,7 +19,6 @@ use std::{env, thread};
 
 use getopts::Options;
 use log::{error, info};
-use redis::{ConnectionAddr, IntoConnectionInfo};
 use redis_event::config::Config;
 use redis_event::listener;
 use redis_event::RedisListener;
@@ -40,21 +38,14 @@ fn main() {
 }
 
 fn run(opt: Opt) {
-    let (socket_addr, source_passwd) = get_source_addr_passwd(&opt);
-    let source_addr = socket_addr.to_string();
-    let config = new_redis_listener_config(
-        opt.discard_rdb,
-        opt.aof,
-        socket_addr,
-        source_passwd,
-        &source_addr,
-    );
+    let config = new_redis_listener_config(&opt);
+    let source_addr = format!("{}:{}", &config.host, config.port);
     // 先关闭listener，因为listener在读取流中的数据时，是阻塞的，
     // 所以在接收到ctrl-c信号的时候，得再等一会，等redis master的数据来到(或者读取超时)，此时，程序才会继续运行，
     // 等命令被handler处理完之后，listener才能结束，而且handler的结束还必须在listener之后，要不然丢数据
     let is_running = Arc::new(AtomicBool::new(true));
     setup_ctrlc_handler(is_running.clone());
-    
+
     let mut builder = listener::Builder::new();
     builder.with_config(config);
     builder.with_control_flag(Arc::clone(&is_running));
@@ -100,23 +91,51 @@ fn run(opt: Opt) {
     }
 }
 
-fn new_redis_listener_config(
-    is_discard_rdb: bool,
-    is_aof: bool,
-    socket_addr: SocketAddr,
-    source_passwd: Option<String>,
-    source_addr: &String,
-) -> Config {
+fn new_redis_listener_config(opt: &Opt) -> Config {
+    let url = match url::Url::parse(&opt.source) {
+        Ok(result) => match result.scheme() {
+            "redis" | "rediss" => Ok(result),
+            _ => {
+                let err = format!("不支持的Redis URL: {}", &opt.source);
+                Err(Error::new(ErrorKind::InvalidInput, err))
+            }
+        },
+        Err(e) => Err(Error::new(ErrorKind::InvalidInput, e)),
+    }
+    .unwrap();
+
+    let is_tls_enabled = url.scheme() == "rediss";
+    let is_tls_insecure = match url.fragment() {
+        None => false,
+        Some(q) => q == "insecure",
+    };
+
+    let source_host = url.host().unwrap().to_string();
+    let source_port = url.port().unwrap();
+
+    let username = url.username().to_string();
+    let password = match &url.password() {
+        None => String::from(""),
+        Some(passwd) => passwd.to_string(),
+    };
+
     let mut config = redis_event::config::Config {
-        is_discard_rdb,
-        is_aof,
-        addr: socket_addr,
-        password: source_passwd.unwrap_or_default(),
+        is_discard_rdb: opt.discard_rdb,
+        is_aof: opt.aof,
+        host: source_host.to_string(),
+        port: source_port,
+        username,
+        password,
         repl_id: "?".to_string(),
         repl_offset: -1,
         read_timeout: None,
         write_timeout: None,
+        is_tls_enabled,
+        is_tls_insecure,
+        identity: opt.identity.clone(),
+        identity_passwd: opt.identity_passwd.clone(),
     };
+    let source_addr = format!("{}:{}", &source_host, source_port);
     if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
         info!(
             "获取到PSYNC记录信息, id: {}, offset: {}",
@@ -126,23 +145,6 @@ fn new_redis_listener_config(
         config.repl_offset = repl_offset;
     }
     config
-}
-
-fn get_source_addr_passwd(opt: &Opt) -> (SocketAddr, Option<String>) {
-    let source = opt
-        .source
-        .as_str()
-        .into_connection_info()
-        .expect("源Redis URI无效");
-    let socket_addr;
-    if let ConnectionAddr::Tcp(host, port) = source.addr.as_ref() {
-        let addr = format!("{}:{}", host, port);
-        let mut iter = addr.to_socket_addrs().expect("");
-        socket_addr = iter.next().unwrap();
-    } else {
-        unimplemented!("Unix Domain Socket");
-    }
-    (socket_addr, source.passwd)
 }
 
 fn setup_ctrlc_handler(r1: Arc<AtomicBool>) {
@@ -206,6 +208,8 @@ struct Opt {
     cluster: bool,
     batch_size: i32,
     flush_interval: u64,
+    identity: Option<String>,
+    identity_passwd: Option<String>,
 }
 
 const METADATA: &'static str = ".copy-redis";
@@ -217,7 +221,7 @@ fn parse_args(args: Vec<String>) -> Opt {
         "s",
         "source",
         "此Redis内的数据将复制到目的Redis中",
-        "源Redis的URI, 格式:\"redis://[:password@]host:port[/db]\"",
+        "源Redis的URI, 格式: \"redis[s]://[user:password@]host:port[/#insecure]\"",
     );
     opts.optmulti("t", "target", "", "目的Redis的URI, URI格式同上");
     opts.optflag(
@@ -240,6 +244,18 @@ fn parse_args(args: Vec<String>) -> Opt {
         "2500",
     );
     opts.optopt("i", "flush-interval", "发送命令的最短间隔时间(毫秒)", "100");
+    opts.optopt(
+        "",
+        "identity",
+        "与源Redis进行TLS认证时验证自身身份所使用的Key文件路径",
+        "",
+    );
+    opts.optopt(
+        "",
+        "identity-passwd",
+        "identity参数所指定的key文件解密时所需的密码",
+        "",
+    );
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
 
@@ -264,7 +280,6 @@ fn parse_args(args: Vec<String>) -> Opt {
     let (source, targets) = if matches.opt_present("s") && matches.opt_present("t") {
         (matches.opt_str("s").unwrap(), matches.opt_strs("t"))
     } else {
-        eprint!("Error: {}\r\n\r\n", "请指定source与target参数");
         print_usage(&opts);
         exit(1);
     };
@@ -274,6 +289,8 @@ fn parse_args(args: Vec<String>) -> Opt {
     let cluster = matches.opt_present("cluster");
     let aof = matches.opt_present("aof");
     let log_file = matches.opt_str("l");
+    let identity = matches.opt_str("identity");
+    let identity_passwd = matches.opt_str("identity-passwd");
 
     let batch_size = if matches.opt_present("p") {
         let _str = matches.opt_str("p").unwrap();
@@ -313,6 +330,8 @@ fn parse_args(args: Vec<String>) -> Opt {
         cluster,
         batch_size,
         flush_interval,
+        identity,
+        identity_passwd,
     };
 }
 

@@ -1,19 +1,20 @@
 [package]
 name = "copy-redis"
-version = "0.2.3"
+version = "0.3.0"
 authors = ["maplestoria <zkx6648@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-redis-event = "1.1.0"
+redis-event = "1.2.0"
 log = "0.4.0"
 fern = "0.5"
 chrono = "0.4"
 getopts = "0.2"
-redis = { version = "0.15.1", features = ["cluster"] }
+redis = { version = "0.17", features = ["cluster", "async-std-tls-comp", "tokio-tls-comp"] }
 ctrlc = { version = "3.0", features = ["termination"] }
 murmurhash64 = "0.3.1"
-r2d2_redis = "0.13.0"
+r2d2_redis = { git = " https://github.com/maplestoria/r2d2-redis.git" }
 scheduled-thread-pool = "0.2.4"
+url = "2.1"
