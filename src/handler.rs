@@ -1,5 +1,5 @@
-use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc};
 
 use redis_event::rdb::Object;
 use redis_event::Event::{AOF, RDB};
@@ -9,6 +9,7 @@ use crate::command::CommandConverter;
 use crate::worker;
 use crate::worker::{Message, Worker};
 use redis::Cmd;
+use std::sync::atomic::AtomicBool;
 
 pub(crate) struct EventHandlerImpl {
     worker: Worker,
@@ -65,7 +66,12 @@ impl CommandConverter for EventHandlerImpl {
     }
 }
 
-pub(crate) fn new(target: String, batch_size: i32, flush_interval: u64) -> EventHandlerImpl {
+pub(crate) fn new(
+    target: String,
+    batch_size: i32,
+    flush_interval: u64,
+    control_flag: Arc<AtomicBool>,
+) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
     let worker_thread = worker::new_worker(
         target,
@@ -73,6 +79,7 @@ pub(crate) fn new(target: String, batch_size: i32, flush_interval: u64) -> Event
         "copy_redis::worker",
         batch_size,
         flush_interval,
+        control_flag,
     );
     EventHandlerImpl {
         worker: Worker {

@@ -1,12 +1,14 @@
+use log::{error, info};
+use r2d2_redis::r2d2::HandleError;
+use r2d2_redis::{r2d2, RedisConnectionManager};
+use scheduled_thread_pool::ScheduledThreadPool;
+use std::error;
 use std::ops::DerefMut;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-
-use log::{error, info};
-use r2d2_redis::{r2d2, RedisConnectionManager};
-use scheduled_thread_pool::ScheduledThreadPool;
 
 pub(crate) struct Worker {
     pub(crate) thread: Option<thread::JoinHandle<()>>,
@@ -23,6 +25,7 @@ pub(crate) fn new_worker(
     name: &str,
     batch_size: i32,
     flush_interval: u64,
+    control_flag: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     let builder = thread::Builder::new().name(name.into());
     let worker = builder
@@ -37,6 +40,7 @@ pub(crate) fn new_worker(
                     "r2d2-worker-{}",
                     1,
                 )))
+                .error_handler(Box::new(ConnectionErrorHandler { control_flag }))
                 .build(manager)
                 .unwrap();
             let mut pipeline = redis::pipe();
@@ -86,4 +90,23 @@ pub(crate) fn new_worker(
         })
         .unwrap();
     return worker;
+}
+
+#[derive(Debug)]
+struct ConnectionErrorHandler {
+    control_flag: Arc<AtomicBool>,
+}
+
+impl<E> HandleError<E> for ConnectionErrorHandler
+where
+    E: error::Error,
+{
+    fn handle_error(&self, error: E) {
+        if error.to_string().eq("extension error") {
+            self.control_flag.store(false, Ordering::Relaxed);
+            panic!("Extension error. This error may be caused by ACL, please check whether there is a +ping rule in your Redis's ACL config.")
+        } else {
+            error!("{}", error);
+        }
+    }
 }

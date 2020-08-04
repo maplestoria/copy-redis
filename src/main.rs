@@ -55,8 +55,12 @@ fn run(opt: Opt) {
             panic!("不能同时指定sharding与cluster")
         }
         if opt.sharding {
-            let event_handler =
-                sharding::new_sharded(opt.targets, opt.batch_size, opt.flush_interval);
+            let event_handler = sharding::new_sharded(
+                opt.targets,
+                opt.batch_size,
+                opt.flush_interval,
+                Arc::clone(&is_running),
+            );
             builder.with_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
             let event_handler = cluster::new_cluster(opt.targets, is_running.clone());
@@ -67,6 +71,7 @@ fn run(opt: Opt) {
             opt.targets.get(0).unwrap().to_string(),
             opt.batch_size,
             opt.flush_interval,
+            Arc::clone(&is_running),
         );
         builder.with_event_handler(Rc::new(RefCell::new(event_handler)));
     }

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc};
 
 use murmurhash64::murmur_hash64a;
 use redis::{Arg, Cmd, ConnectionAddr, IntoConnectionInfo};
@@ -12,6 +12,7 @@ use redis_event::{Event, EventHandler};
 use crate::command::CommandConverter;
 use crate::worker::new_worker;
 use crate::worker::{Message, Worker};
+use std::sync::atomic::AtomicBool;
 
 const SEED: u64 = 0x1234ABCD;
 
@@ -212,6 +213,7 @@ pub(crate) fn new_sharded(
     initial_nodes: Vec<String>,
     batch_size: i32,
     flush_interval: u64,
+    control_flag: Arc<AtomicBool>,
 ) -> ShardedEventHandler {
     let mut senders: BTreeMap<String, Sender<Message>> = BTreeMap::new();
     let mut workers = Vec::new();
@@ -221,7 +223,8 @@ pub(crate) fn new_sharded(
         let info = node.as_str().into_connection_info().unwrap();
         let addr = match *info.addr {
             ConnectionAddr::Tcp(ref host, port) => format!("{}-{}:{}", i, host, port),
-            _ => panic!("No reach."),
+            ConnectionAddr::TcpTls { ref host, port, .. } => format!("{}-{}:{}", i, host, port),
+            _ => unimplemented!("Only support Tcp"),
         };
         for n in 0..160 {
             let name = format!("SHARD-{}-NODE-{}", i, n);
@@ -236,6 +239,7 @@ pub(crate) fn new_sharded(
             &worker_name,
             batch_size,
             flush_interval,
+            control_flag.clone(),
         );
         senders.insert(addr, sender);
         workers.push(Worker {
