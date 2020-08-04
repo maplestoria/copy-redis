@@ -111,7 +111,7 @@ fn new_redis_listener_config(opt: &Opt) -> Config {
     };
 
     let source_host = url.host().unwrap().to_string();
-    let source_port = url.port().unwrap() as i16;
+    let source_port = url.port().unwrap();
 
     let username = url.username().to_string();
     let password = match &url.password() {
@@ -221,7 +221,7 @@ fn parse_args(args: Vec<String>) -> Opt {
         "s",
         "source",
         "此Redis内的数据将复制到目的Redis中",
-        "源Redis的URI, 格式: \"redis[s]://[:password@]host:port[/#insecure]\"",
+        "源Redis的URI, 格式: \"redis[s]://[user:password@]host:port[/#insecure]\"",
     );
     opts.optmulti("t", "target", "", "目的Redis的URI, URI格式同上");
     opts.optflag(
