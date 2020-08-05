@@ -55,12 +55,8 @@ fn run(opt: Opt) {
             panic!("不能同时指定sharding与cluster")
         }
         if opt.sharding {
-            let event_handler = sharding::new_sharded(
-                opt.targets,
-                opt.batch_size,
-                opt.flush_interval,
-                Arc::clone(&is_running),
-            );
+            let event_handler =
+                sharding::new_sharded(opt.targets, opt.batch_size, opt.flush_interval, Arc::clone(&is_running));
             builder.with_event_handler(Rc::new(RefCell::new(event_handler)));
         } else {
             let event_handler = cluster::new_cluster(opt.targets, is_running.clone());
@@ -92,11 +88,7 @@ fn run(opt: Opt) {
     }
 
     // 程序正常退出时，保存repl id和offset
-    if let Err(err) = save_repl_meta(
-        &source_addr,
-        &listener.config.repl_id,
-        listener.config.repl_offset,
-    ) {
+    if let Err(err) = save_repl_meta(&source_addr, &listener.config.repl_id, listener.config.repl_offset) {
         error!("保存PSYNC信息失败:{}", err);
     }
 }
@@ -147,10 +139,7 @@ fn new_redis_listener_config(opt: &Opt) -> Config {
     };
     let source_addr = format!("{}:{}", &source_host, source_port);
     if let Ok((repl_id, repl_offset)) = load_repl_meta(&source_addr) {
-        info!(
-            "获取到PSYNC记录信息, id: {}, offset: {}",
-            repl_id, repl_offset
-        );
+        info!("获取到PSYNC记录信息, id: {}, offset: {}", repl_id, repl_offset);
         config.repl_id = repl_id;
         config.repl_offset = repl_offset;
     }
@@ -186,10 +175,7 @@ fn load_repl_meta(source_addr: &str) -> io::Result<(String, i64)> {
             return Ok((id.to_string(), offset));
         }
     }
-    Err(Error::new(
-        io::ErrorKind::InvalidData,
-        "未能获取到有效的PSYNC记录信息",
-    ))
+    Err(Error::new(io::ErrorKind::InvalidData, "未能获取到有效的PSYNC记录信息"))
 }
 
 fn save_repl_meta(source_addr: &str, id: &str, offset: i64) -> io::Result<()> {
@@ -239,11 +225,7 @@ fn parse_args(args: Vec<String>) -> Opt {
         "discard-rdb",
         "是否跳过整个RDB不进行复制. 默认为false, 复制完整的RDB",
     );
-    opts.optflag(
-        "a",
-        "aof",
-        "是否需要处理AOF. 默认为false, 当RDB复制完后程序将终止",
-    );
+    opts.optflag("a", "aof", "是否需要处理AOF. 默认为false, 当RDB复制完后程序将终止");
     opts.optflag("", "sharding", "是否sharding模式");
     opts.optflag("", "cluster", "是否cluster模式");
     opts.optopt("l", "log", "默认输出至stdout", "日志输出文件");
@@ -260,12 +242,7 @@ fn parse_args(args: Vec<String>) -> Opt {
         "与源Redis进行TLS认证时验证自身身份所使用的Key文件路径",
         "",
     );
-    opts.optopt(
-        "",
-        "identity-passwd",
-        "identity参数所指定的key文件解密时所需的密码",
-        "",
-    );
+    opts.optopt("", "identity-passwd", "identity参数所指定的key文件解密时所需的密码", "");
     opts.optflag("h", "help", "输出帮助信息");
     opts.optflag("v", "version", "");
 
@@ -366,8 +343,7 @@ fn setup_logger(log_file: &Option<String>) -> Result<(), fern::InitError> {
     });
 
     if log_file.is_some() {
-        let file_config =
-            log_format.chain(fern::log_file(PathBuf::from(log_file.as_ref().unwrap()))?);
+        let file_config = log_format.chain(fern::log_file(PathBuf::from(log_file.as_ref().unwrap()))?);
         base_config.chain(file_config).apply()?;
     } else {
         let stdout_config = log_format.chain(io::stdout());

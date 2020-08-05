@@ -67,10 +67,7 @@ impl CommandConverter for EventHandlerImpl {
 }
 
 pub(crate) fn new(
-    target: String,
-    batch_size: i32,
-    flush_interval: u64,
-    control_flag: Arc<AtomicBool>,
+    target: String, batch_size: i32, flush_interval: u64, control_flag: Arc<AtomicBool>,
 ) -> EventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
     let worker_thread = worker::new_worker(

@@ -232,9 +232,7 @@ pub trait CommandConverter {
             }
             Command::HINCRBY(hincrby) => {
                 let mut cmd = redis::cmd("HINCRBY");
-                cmd.arg(hincrby.key)
-                    .arg(hincrby.field)
-                    .arg(hincrby.increment);
+                cmd.arg(hincrby.key).arg(hincrby.field).arg(hincrby.increment);
                 self.execute(cmd, None);
             }
             Command::HMSET(hmset) => {
@@ -381,9 +379,7 @@ pub trait CommandConverter {
             }
             Command::PSETEX(psetex) => {
                 let mut cmd = redis::cmd("PSETEX");
-                cmd.arg(psetex.key)
-                    .arg(psetex.milliseconds)
-                    .arg(psetex.value);
+                cmd.arg(psetex.key).arg(psetex.milliseconds).arg(psetex.value);
                 self.execute(cmd, None);
             }
             Command::PUBLISH(publish) => {
@@ -520,9 +516,7 @@ pub trait CommandConverter {
             }
             Command::SETRANGE(setrange) => {
                 let mut cmd = redis::cmd("SETRANGE");
-                cmd.arg(setrange.key)
-                    .arg(setrange.offset)
-                    .arg(setrange.value);
+                cmd.arg(setrange.key).arg(setrange.offset).arg(setrange.value);
                 self.execute(cmd, None);
             }
             Command::SINTERSTORE(sinterstore) => {
@@ -535,9 +529,7 @@ pub trait CommandConverter {
             }
             Command::SMOVE(smove) => {
                 let mut cmd = redis::cmd("SMOVE");
-                cmd.arg(smove.source)
-                    .arg(smove.destination)
-                    .arg(smove.member);
+                cmd.arg(smove.source).arg(smove.destination).arg(smove.member);
                 self.execute(cmd, None);
             }
             Command::SORT(sort) => {
@@ -626,9 +618,7 @@ pub trait CommandConverter {
             }
             Command::ZINCRBY(zincrby) => {
                 let mut cmd = redis::cmd("ZINCRBY");
-                cmd.arg(zincrby.key)
-                    .arg(zincrby.increment)
-                    .arg(zincrby.member);
+                cmd.arg(zincrby.key).arg(zincrby.increment).arg(zincrby.member);
                 self.execute(cmd, None);
             }
             Command::ZINTERSTORE(zinterstore) => {
@@ -700,9 +690,7 @@ pub trait CommandConverter {
             }
             Command::ZUNIONSTORE(zunion) => {
                 let mut cmd = redis::cmd("ZUNIONSTORE");
-                cmd.arg(zunion.destination)
-                    .arg(zunion.destination)
-                    .arg(zunion.num_keys);
+                cmd.arg(zunion.destination).arg(zunion.destination).arg(zunion.num_keys);
                 for key in &zunion.keys {
                     cmd.arg(*key);
                 }
@@ -788,16 +776,10 @@ pub trait CommandConverter {
             Command::XGROUP(xgroup) => {
                 let mut cmd = redis::cmd("XGROUP");
                 if let Some(create) = &xgroup.create {
-                    cmd.arg("CREATE")
-                        .arg(create.key)
-                        .arg(create.group_name)
-                        .arg(create.id);
+                    cmd.arg("CREATE").arg(create.key).arg(create.group_name).arg(create.id);
                 }
                 if let Some(set_id) = &xgroup.set_id {
-                    cmd.arg("SETID")
-                        .arg(set_id.key)
-                        .arg(set_id.group_name)
-                        .arg(set_id.id);
+                    cmd.arg("SETID").arg(set_id.key).arg(set_id.group_name).arg(set_id.id);
                 }
                 if let Some(destroy) = &xgroup.destroy {
                     cmd.arg("DESTROY").arg(destroy.key).arg(destroy.group_name);

@@ -93,10 +93,7 @@ impl CommandConverter for ClusterEventHandlerImpl {
     }
 }
 
-pub(crate) fn new_cluster(
-    target: Vec<String>,
-    running: Arc<AtomicBool>,
-) -> ClusterEventHandlerImpl {
+pub(crate) fn new_cluster(target: Vec<String>, running: Arc<AtomicBool>) -> ClusterEventHandlerImpl {
     let (sender, receiver) = mpsc::channel();
     let worker_thread = thread::spawn(move || {
         info!(target: "cluster::worker", "Worker thread started");

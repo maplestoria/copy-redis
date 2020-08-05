@@ -20,11 +20,7 @@ pub(crate) enum Message {
 }
 
 pub(crate) fn new_worker(
-    target: String,
-    receiver: Receiver<Message>,
-    name: &str,
-    batch_size: i32,
-    flush_interval: u64,
+    target: String, receiver: Receiver<Message>, name: &str, batch_size: i32, flush_interval: u64,
     control_flag: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     let builder = thread::Builder::new().name(name.into());
@@ -36,10 +32,7 @@ pub(crate) fn new_worker(
             let manager = RedisConnectionManager::new(target).unwrap();
             let pool = r2d2::Pool::builder()
                 .max_size(1)
-                .thread_pool(Arc::new(ScheduledThreadPool::with_name(
-                    "r2d2-worker-{}",
-                    1,
-                )))
+                .thread_pool(Arc::new(ScheduledThreadPool::with_name("r2d2-worker-{}", 1)))
                 .error_handler(Box::new(ConnectionErrorHandler { control_flag }))
                 .build(manager)
                 .unwrap();

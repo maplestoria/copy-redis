@@ -90,18 +90,12 @@ impl EventHandler for ShardedEventHandler {
                 Command::XGROUP(xgroup) => {
                     if let Some(create) = &xgroup.create {
                         let mut cmd = redis::cmd("XGROUP");
-                        cmd.arg("CREATE")
-                            .arg(create.key)
-                            .arg(create.group_name)
-                            .arg(create.id);
+                        cmd.arg("CREATE").arg(create.key).arg(create.group_name).arg(create.id);
                         self.execute(cmd, Some(create.key));
                     }
                     if let Some(set_id) = &xgroup.set_id {
                         let mut cmd = redis::cmd("XGROUP");
-                        cmd.arg("SETID")
-                            .arg(set_id.key)
-                            .arg(set_id.group_name)
-                            .arg(set_id.id);
+                        cmd.arg("SETID").arg(set_id.key).arg(set_id.group_name).arg(set_id.id);
                         self.execute(cmd, Some(set_id.key));
                     }
                     if let Some(destroy) = &xgroup.destroy {
@@ -210,10 +204,7 @@ impl CommandConverter for ShardedEventHandler {
 }
 
 pub(crate) fn new_sharded(
-    initial_nodes: Vec<String>,
-    batch_size: i32,
-    flush_interval: u64,
-    control_flag: Arc<AtomicBool>,
+    initial_nodes: Vec<String>, batch_size: i32, flush_interval: u64, control_flag: Arc<AtomicBool>,
 ) -> ShardedEventHandler {
     let mut senders: BTreeMap<String, Sender<Message>> = BTreeMap::new();
     let mut workers = Vec::new();
@@ -242,9 +233,7 @@ pub(crate) fn new_sharded(
             control_flag.clone(),
         );
         senders.insert(addr, sender);
-        workers.push(Worker {
-            thread: Some(worker),
-        });
+        workers.push(Worker { thread: Some(worker) });
     }
     ShardedEventHandler {
         workers,
