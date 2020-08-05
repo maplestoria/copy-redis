@@ -79,8 +79,13 @@ fn run(opt: Opt) {
 
     while is_running.load(Ordering::Relaxed) {
         if let Err(error) = listener.start() {
-            error!("连接到源Redis错误: {}", error.to_string());
-            thread::sleep(Duration::from_millis(2000));
+            let error = error.to_string();
+            if error.starts_with("NOPERM") {
+                panic!(error);
+            } else {
+                error!("连接到源Redis错误: {}", error);
+                thread::sleep(Duration::from_millis(2000));
+            }
         } else {
             break;
         }
