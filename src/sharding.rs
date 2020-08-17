@@ -12,6 +12,7 @@ use redis_event::{Event, EventHandler};
 use crate::command::CommandConverter;
 use crate::worker::new_worker;
 use crate::worker::{Message, Worker};
+use scheduled_thread_pool::ScheduledThreadPool;
 use std::sync::atomic::AtomicBool;
 
 const SEED: u64 = 0x1234ABCD;
@@ -29,6 +30,7 @@ impl EventHandler for ShardedEventHandler {
             AOF(cmd) => match cmd {
                 Command::SELECT(select) => {
                     let db = select.db.to_string();
+                    self.swap_db(select.db);
                     self.broadcast("SELECT", Some(&vec![db.as_bytes()]));
                 }
                 Command::DEL(del) => {
@@ -218,6 +220,12 @@ pub(crate) fn new_sharded(
     let mut senders: BTreeMap<String, Sender<Message>> = BTreeMap::new();
     let mut workers = Vec::new();
     let mut nodes: BTreeMap<u64, String> = BTreeMap::new();
+    let threads = if initial_nodes.len() < 3 {
+        initial_nodes.len()
+    } else {
+        3
+    };
+    let thread_pool = Arc::new(ScheduledThreadPool::with_name("r2d2-worker-{}", threads));
 
     for (i, node) in initial_nodes.into_iter().enumerate() {
         let info = node.as_str().into_connection_info().unwrap();
@@ -240,6 +248,7 @@ pub(crate) fn new_sharded(
             batch_size,
             flush_interval,
             control_flag.clone(),
+            Arc::clone(&thread_pool),
         );
         senders.insert(addr, sender);
         workers.push(Worker { thread: Some(worker) });

@@ -9,6 +9,7 @@ use crate::command::CommandConverter;
 use crate::worker;
 use crate::worker::{Message, Worker};
 use redis::Cmd;
+use scheduled_thread_pool::ScheduledThreadPool;
 use std::sync::atomic::AtomicBool;
 
 pub(crate) struct EventHandlerImpl {
@@ -83,6 +84,7 @@ pub(crate) fn new(
         batch_size,
         flush_interval,
         control_flag,
+        Arc::new(ScheduledThreadPool::with_name("r2d2-worker-{}", 1)),
     );
     EventHandlerImpl {
         worker: Worker {
