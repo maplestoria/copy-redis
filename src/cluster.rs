@@ -91,6 +91,8 @@ impl CommandConverter for ClusterEventHandlerImpl {
             panic!("{}", err)
         }
     }
+
+    fn swap_db(&mut self, _: i32) {}
 }
 
 pub(crate) fn new_cluster(target: Vec<String>, running: Arc<AtomicBool>) -> ClusterEventHandlerImpl {
@@ -119,7 +121,7 @@ pub(crate) fn new_cluster(target: Vec<String>, running: Arc<AtomicBool>) -> Clus
                 Ok(Message::Terminate) => {
                     shutdown = true;
                 }
-                Err(_) => {}
+                _ => {}
             }
             if shutdown {
                 break;

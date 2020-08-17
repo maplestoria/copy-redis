@@ -1,14 +1,16 @@
-use log::{error, info};
-use r2d2_redis::r2d2::HandleError;
-use r2d2_redis::{r2d2, RedisConnectionManager};
-use scheduled_thread_pool::ScheduledThreadPool;
 use std::error;
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use log::{error, info};
+use r2d2_redis::r2d2::{CustomizeConnection, HandleError};
+use r2d2_redis::redis::{Connection, IntoConnectionInfo};
+use r2d2_redis::{r2d2, RedisConnectionManager};
+use scheduled_thread_pool::ScheduledThreadPool;
 
 pub(crate) struct Worker {
     pub(crate) thread: Option<thread::JoinHandle<()>>,
@@ -16,6 +18,7 @@ pub(crate) struct Worker {
 
 pub(crate) enum Message {
     Cmd(redis::Cmd),
+    SwapDb(i64),
     Terminate,
 }
 
@@ -29,11 +32,18 @@ pub(crate) fn new_worker(
             let handle = thread::current();
             let t_name = handle.name().unwrap();
             info!(target: t_name, "Worker thread started");
+            let conn_info = target
+                .as_str()
+                .into_connection_info()
+                .expect("解析Target Redis地址失败");
+            let db: Arc<AtomicI64> = Arc::new(AtomicI64::new(conn_info.db));
+
             let manager = RedisConnectionManager::new(target).unwrap();
             let pool = r2d2::Pool::builder()
                 .max_size(1)
                 .thread_pool(Arc::new(ScheduledThreadPool::with_name("r2d2-worker-{}", 1)))
                 .error_handler(Box::new(ConnectionErrorHandler { control_flag }))
+                .connection_customizer(Box::new(ConnectionCustomizer { db: Arc::clone(&db) }))
                 .build(manager)
                 .unwrap();
             let mut pipeline = redis::pipe();
@@ -46,10 +56,14 @@ pub(crate) fn new_worker(
                     match receiver.recv_timeout(Duration::from_millis(10)) {
                         Ok(Message::Cmd(cmd)) => {
                             pipeline.add_command(cmd);
+                            db.load(Ordering::Relaxed);
                             count += 1;
                         }
                         Ok(Message::Terminate) => {
                             shutdown = true;
+                        }
+                        Ok(Message::SwapDb(_db)) => {
+                            db.store(_db, Ordering::SeqCst);
                         }
                         Err(_) => {}
                     }
@@ -97,9 +111,28 @@ where
     fn handle_error(&self, error: E) {
         if error.to_string().eq("extension error") {
             self.control_flag.store(false, Ordering::Relaxed);
-            panic!("Extension error. This error may be caused by ACL, please check whether there is a +ping rule in your Redis's ACL config.")
+            panic!("Extension error. This error may be caused by ACL, please check your Redis's ACL config.")
         } else {
             error!("{}", error);
         }
+    }
+}
+
+#[derive(Debug)]
+struct ConnectionCustomizer {
+    db: Arc<AtomicI64>,
+}
+
+impl CustomizeConnection<Connection, r2d2_redis::Error> for ConnectionCustomizer {
+    fn on_acquire(&self, conn: &mut Connection) -> Result<(), r2d2_redis::Error> {
+        let db = self.db.load(Ordering::Relaxed);
+        match redis::cmd("SELECT").arg(db).query(conn) {
+            Ok(()) => info!("db切换至{}", db),
+            Err(e) => {
+                error!("切换db失败: {}", e);
+                return Err(r2d2_redis::Error::Other(e));
+            }
+        }
+        Ok(())
     }
 }
