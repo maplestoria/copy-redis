@@ -512,6 +512,7 @@ pub trait CommandConverter {
             Command::SELECT(select) => {
                 let mut cmd = redis::cmd("SELECT");
                 cmd.arg(select.db);
+                self.swap_db(select.db);
                 self.execute(cmd, None);
             }
             Command::SETRANGE(setrange) => {
@@ -822,4 +823,6 @@ pub trait CommandConverter {
     }
 
     fn execute(&mut self, cmd: Cmd, key: Option<&[u8]>);
+
+    fn swap_db(&mut self, db: i32);
 }

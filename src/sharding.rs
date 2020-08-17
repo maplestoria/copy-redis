@@ -201,6 +201,15 @@ impl CommandConverter for ShardedEventHandler {
             }
         }
     }
+
+    fn swap_db(&mut self, db: i32) {
+        let senders = self.senders.borrow();
+        for (_, sender) in senders.iter() {
+            if let Err(err) = sender.send(Message::SwapDb(db as i64)) {
+                panic!("{}", err)
+            }
+        }
+    }
 }
 
 pub(crate) fn new_sharded(

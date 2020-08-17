@@ -64,6 +64,12 @@ impl CommandConverter for EventHandlerImpl {
             panic!("{}", err)
         }
     }
+
+    fn swap_db(&mut self, db: i32) {
+        if let Err(err) = self.sender.send(Message::SwapDb(db as i64)) {
+            panic!("{}", err)
+        }
+    }
 }
 
 pub(crate) fn new(

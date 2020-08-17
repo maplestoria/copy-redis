@@ -76,7 +76,7 @@ fn run(opt: Opt) {
     while is_running.load(Ordering::Relaxed) {
         if let Err(error) = listener.start() {
             let error = error.to_string();
-            if error.starts_with("NOPERM") {
+            if error.starts_with("NOPERM") || error.starts_with("NOAUTH") {
                 panic!(error);
             } else {
                 error!("连接到源Redis错误: {}", error);
